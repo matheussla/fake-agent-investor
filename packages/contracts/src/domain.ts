@@ -24,6 +24,8 @@ export type CancelResult = { cancelled: boolean };
 export type ReconciliationResult = { consistent: boolean };
 export interface PortfolioSnapshot { cash: string; positions: Array<{ symbol: string; quantity: string; costBasis: string }> }
 export interface PortfolioValuation { cash: string; equity: string; realizedProfit: string; unrealizedProfit: string; totalProfit: string; }
+export interface FillAccountingInput { side: "buy" | "sell"; quantity: string; price: string; fee: string; cash: string; positionQuantity: string; costBasis: string; }
+export interface FillAccountingResult { cash: string; positionQuantity: string; costBasis: string; realizedProfit: string; }
 export interface NewSimulationInput { startingCash: string; }
 export interface Simulation { id: string; status: "active" | "archived"; }
 
