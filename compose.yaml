@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: paper_investor
+      POSTGRES_USER: paper
+      POSTGRES_PASSWORD: paper
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/10-create-test-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paper -d paper_investor"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+volumes:
+  postgres-data:

@@ -3,18 +3,26 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@10.22.0",
-  "engines": { "node": ">=22 <25" },
+  "engines": {
+    "node": ">=22 <25"
+  },
   "scripts": {
     "dev": "concurrently -k -n server,web -c blue,green 'pnpm --filter @paper-investor/server dev' 'pnpm --filter @paper-investor/web dev'",
     "lint": "eslint .",
     "typecheck": "pnpm -r typecheck",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
+    "db:up": "docker compose up -d --wait",
+    "db:down": "docker compose down",
+    "db:migrate": "pnpm --filter @paper-investor/server db:migrate",
+    "db:migrate:test": "DATABASE_URL=postgres://paper:paper@127.0.0.1:5433/paper_investor_test pnpm --filter @paper-investor/server db:migrate",
     "build": "pnpm -r build"
   },
   "devDependencies": {
     "@types/node": "^24.10.0",
+    "@types/pg": "^8.23.1",
     "concurrently": "^9.2.1",
+    "drizzle-kit": "^0.31.11",
     "eslint": "^9.39.1",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.48.1",
