@@ -1,7 +1,11 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import type { Pool } from "pg";
+import { EventHub } from "./http/sse.js";
+import { registerReadRoutes } from "./http/read-routes.js";
 
-export function buildApp(): FastifyInstance {
+export function buildApp(pool?: Pool, events = new EventHub()): FastifyInstance {
   const app = Fastify({ logger: true });
-  app.get("/api/health", async () => ({ status: "ok", modules: { database: "unavailable", market: "unavailable" } }));
+  app.get("/health", async () => ({ status: "ok" }));
+  if (pool) registerReadRoutes(app, pool, events);
   return app;
 }
