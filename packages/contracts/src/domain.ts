@@ -14,6 +14,7 @@ export interface Candle { symbol: string; openTime: string; closeTime: string; o
 export interface CandleRequest { symbol: string; startTime: string; endTime: string; interval: "1m"; }
 export interface ProviderHealth { status: "healthy" | "degraded" | "unavailable"; lastMessageAt?: string; detail?: string; }
 export type MarketEvent = { type: "quote"; quote: Quote } | { type: "candle"; candle: Candle } | { type: "health"; health: ProviderHealth };
+export type MarketUpdate = MarketEvent | { type: "ticker"; symbol: string; priceChangePercent: string; quoteVolume: string; observedAt: string };
 export type DecisionResult = { decision: Decision; usage?: { inputTokens?: number; outputTokens?: number } };
 export interface DecisionInput { simulationId: string; snapshot: unknown; market: Quote[]; limits: unknown; prompt: string; promptVersion: number; configurationVersion: number; }
 export interface ApprovedOrder { decisionId: string; simulationId: string; runGeneration: number; configurationVersion: number; symbol: string; side: "buy" | "sell"; quantity: string; quote: Quote; }
@@ -33,7 +34,7 @@ export interface MarketDataProvider {
   instruments(signal: AbortSignal): Promise<Instrument[]>;
   quote(symbol: string, signal: AbortSignal): Promise<Quote>;
   candles(request: CandleRequest, signal: AbortSignal): Promise<Candle[]>;
-  subscribe(symbols: string[], emit: (event: MarketEvent) => void): () => void;
+  subscribe(symbols: string[], emit: (event: MarketUpdate) => void): () => void;
   health(): ProviderHealth;
 }
 export interface DecisionProvider { decide(input: DecisionInput, signal: AbortSignal): Promise<DecisionResult>; }
