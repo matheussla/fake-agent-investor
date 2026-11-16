@@ -72,3 +72,7 @@ export const agentState = pgTable("agent_state", {
 export const dailyUsage = pgTable("daily_usage", {
   id: uuid("id").defaultRandom().primaryKey(), utcDate: text("utc_date").notNull(), provider: text("provider").notNull(), attempts: integer("attempts").notNull().default(0), dailyBaseline: money("daily_baseline"), createdAt: created(),
 }, (t) => [unique("usage_date_provider").on(t.utcDate, t.provider)]);
+
+export const dailyBaselines = pgTable("daily_baselines", {
+  id: uuid("id").defaultRandom().primaryKey(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id), utcDate: text("utc_date").notNull(), equity: money("equity").notNull(), observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+}, (t) => [unique("baseline_sim_day").on(t.simulationId, t.utcDate)]);

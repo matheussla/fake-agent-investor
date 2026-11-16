@@ -20,4 +20,8 @@ describe("decimal paper accounting", () => {
     expect(assertAccountingIdentity({ startingCash: "10000", cash: "9943.783972", realizedProfit: "3.874002", positions: [{ quantity: "0.6", costBasis: "60.09003", bid: "110" }] })).toMatchObject({ equity: "10009.783972", totalProfit: "9.783972" });
     expect(() => assertAccountingIdentity({ startingCash: "10000", cash: "9943", realizedProfit: "0", positions: [{ quantity: "0.6", costBasis: "60", bid: "110" }] })).toThrow("does not reconcile");
   });
+  it("does not present a stale held-asset quote as current equity", () => {
+    const old = new Date(Date.now() - 5001).toISOString();
+    expect(() => valuePortfolio({ cash: "0", positions: [{ symbol: "BTCUSDT", quantity: "1", costBasis: "10" }] }, [{ symbol: "BTCUSDT", bid: "10", ask: "11", bidSize: "1", askSize: "1", observedAt: old, receivedAt: old }])).toThrow("stale quote");
+  });
 });
