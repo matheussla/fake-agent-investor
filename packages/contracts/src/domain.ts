@@ -12,7 +12,7 @@ export interface Instrument { symbol: string; baseAsset: string; quoteAsset: str
 export interface Quote { symbol: string; bid: string; ask: string; bidSize: string; askSize: string; observedAt: string; receivedAt: string; }
 export interface Candle { symbol: string; openTime: string; closeTime: string; open: string; high: string; low: string; close: string; volume: string; closed: boolean; }
 export interface CandleRequest { symbol: string; startTime: string; endTime: string; interval: "1m"; }
-export interface ProviderHealth { status: "healthy" | "degraded" | "unavailable"; lastMessageAt?: string; detail?: string; }
+export interface ProviderHealth { status: "healthy" | "degraded" | "unavailable"; symbol?: string; lastMessageAt?: string; detail?: string; }
 export type MarketEvent = { type: "quote"; quote: Quote } | { type: "candle"; candle: Candle } | { type: "health"; health: ProviderHealth };
 export type MarketUpdate = MarketEvent | { type: "ticker"; symbol: string; priceChangePercent: string; quoteVolume: string; observedAt: string };
 export type DecisionResult = { decision: Decision; usage?: { inputTokens?: number; outputTokens?: number } };

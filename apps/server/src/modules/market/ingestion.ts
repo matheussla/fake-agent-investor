@@ -7,6 +7,7 @@ type Fetcher = typeof fetch;
 export class BinanceMarketDataProvider implements MarketDataProvider {
   private readonly quotes = new Map<string, Quote>();
   private readonly updateIds = new Map<string, number>();
+  private readonly lastClosedCandle = new Map<string, string>();
   private socket?: SocketLike;
   private healthState: ProviderHealth = { status: "unavailable", detail: "Not connected" };
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -57,7 +58,19 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
       const streams = normalized.flatMap((symbol) => [`${symbol}@bookTicker`, `${symbol}@ticker`, `${symbol}@kline_1m`]).join("/");
       const socket = this.createSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
       this.socket = socket;
-      socket.addEventListener("open", () => { retry = 0; this.healthState = { status: "healthy", lastMessageAt: new Date().toISOString() }; emit({ type: "health", health: this.healthState }); });
+      socket.addEventListener("open", () => {
+        retry = 0; this.healthState = { status: "healthy", lastMessageAt: new Date().toISOString() }; emit({ type: "health", health: this.healthState });
+        for (const symbol of normalized.map((value) => value.toUpperCase())) {
+          const endTime = new Date();
+          const startTime = this.lastClosedCandle.get(symbol) ?? new Date(endTime.getTime() - 120_000).toISOString();
+          void this.candles({ symbol, interval: "1m", startTime, endTime: endTime.toISOString() }, AbortSignal.timeout(10_000))
+            .then((history) => history.filter((candle) => candle.closed).forEach((candle) => {
+              this.lastClosedCandle.set(symbol, candle.closeTime);
+              emit({ type: "candle", candle });
+            }))
+            .catch(() => emit({ type: "health", health: { status: "degraded", detail: `Candle backfill failed for ${symbol}` } }));
+        }
+      });
       socket.addEventListener("message", (event) => {
         try {
           const envelope = JSON.parse(String((event as MessageEvent).data)) as { stream: string; data: Record<string, unknown> };
@@ -73,7 +86,9 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
             emit({ type: "ticker", symbol: String(data.s), priceChangePercent: String(data.P), quoteVolume: String(data.q), observedAt: now });
           } else if (envelope.stream.endsWith("@kline_1m")) {
             const k = data.k as Record<string, unknown>;
-            emit({ type: "candle", candle: { symbol: String(data.s), openTime: new Date(Number(k.t)).toISOString(), closeTime: new Date(Number(k.T)).toISOString(), open: String(k.o), high: String(k.h), low: String(k.l), close: String(k.c), volume: String(k.v), closed: Boolean(k.x) } });
+            const candle = { symbol: String(data.s), openTime: new Date(Number(k.t)).toISOString(), closeTime: new Date(Number(k.T)).toISOString(), open: String(k.o), high: String(k.h), low: String(k.l), close: String(k.c), volume: String(k.v), closed: Boolean(k.x) };
+            if (candle.closed) this.lastClosedCandle.set(candle.symbol, candle.closeTime);
+            emit({ type: "candle", candle });
           }
           this.healthState = { status: "healthy", lastMessageAt: now };
         } catch { this.healthState = { status: "degraded", detail: "Malformed Binance stream event" }; emit({ type: "health", health: this.healthState }); }
@@ -90,7 +105,12 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
     return () => this.stop();
   }
 
-  health(): ProviderHealth { return this.healthState; }
+  health(symbol?: string): ProviderHealth {
+    if (!symbol) return this.healthState;
+    const quote = this.quotes.get(symbol);
+    if (!quote || Date.now() - Date.parse(quote.receivedAt) > 60_000) return { status: "degraded", symbol, detail: `No fresh ${symbol} quote` };
+    return { ...this.healthState, symbol };
+  }
 
   private stop() {
     this.stopped = true;

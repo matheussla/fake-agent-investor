@@ -26,4 +26,19 @@ describe("Binance public market adapter", () => {
     expect(socket.close).toHaveBeenCalledOnce();
     expect(provider.health().status).toBe("unavailable");
   });
+
+  it("drops duplicate and out-of-order book updates", async () => {
+    const listeners = new Map<string, (event: MessageEvent | Event) => void>();
+    const socket = { addEventListener: vi.fn((type: string, listener: (event: MessageEvent | Event) => void) => listeners.set(type, listener)), close: vi.fn() };
+    const provider = new BinanceMarketDataProvider(vi.fn().mockResolvedValue(response([])), () => socket);
+    const updates: Array<{ type: string }> = [];
+    const stop = provider.subscribe(["BTCUSDT"], (event) => updates.push(event));
+    listeners.get("open")?.(new Event("open"));
+    const send = (id: number) => listeners.get("message")?.({ data: JSON.stringify({ stream: "btcusdt@bookTicker", data: { s: "BTCUSDT", u: id, b: "100", a: "101", B: "1", A: "1" } }) } as MessageEvent);
+    send(10); send(10); send(9);
+    await Promise.resolve();
+    expect(updates.filter((event) => event.type === "quote")).toHaveLength(1);
+    expect(provider.health("ETHUSDT").status).toBe("degraded");
+    stop();
+  });
 });

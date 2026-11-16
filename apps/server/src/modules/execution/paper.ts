@@ -3,7 +3,7 @@ import type { Pool } from "pg";
 import type { MarketDataProvider } from "@paper-investor/contracts";
 import { Decimal } from "decimal.js";
 import { applyFillAccounting } from "../accounting/ledger.js";
-import { validatePaperOrder } from "./validation.js";
+import { assertQuoteFresh, validatePaperOrder } from "./validation.js";
 
 export class PaperExecutionProvider implements ExecutionProvider {
   constructor(private readonly pool: Pool, private readonly market: MarketDataProvider) {}
@@ -21,15 +21,16 @@ export class PaperExecutionProvider implements ExecutionProvider {
       const agent = await client.query("SELECT paused,generation FROM agent_state WHERE simulation_id=$1 FOR UPDATE", [order.simulationId]);
       const config = await client.query("SELECT version FROM configurations WHERE simulation_id=$1 ORDER BY version DESC LIMIT 1", [order.simulationId]);
       if (simulation.rows[0]?.status !== "active" || agent.rows[0]?.generation !== order.runGeneration || config.rows[0]?.version !== order.configurationVersion) throw new Error("Order authorization expired");
+      assertQuoteFresh(quote);
       const decision = await client.query("SELECT id FROM decisions WHERE id=$1 AND simulation_id=$2", [order.decisionId, order.simulationId]);
       if (decision.rowCount !== 1) throw new Error("Decision not found");
-      const cashResult = await client.query("SELECT COALESCE(sum(amount),0)::text AS cash FROM ledger_entries WHERE simulation_id=$1 AND asset='USDT' AND kind IN ('initial_funding','trade_cash')", [order.simulationId]);
+      const cashResult = await client.query("SELECT COALESCE(sum(amount),0)::text AS cash FROM ledger_entries WHERE simulation_id=$1 AND asset='USDT' AND kind IN ('initial_funding','trade_cash','fee')", [order.simulationId]);
       const [existing] = (await client.query("SELECT quantity::text,cost_basis::text FROM positions WHERE simulation_id=$1 AND symbol=$2 FOR UPDATE", [order.simulationId, order.symbol])).rows;
       const accounting = applyFillAccounting({ side: order.side, quantity: validated.quantity, price: validated.price, fee: validated.fee, cash: cashResult.rows[0].cash, positionQuantity: existing?.quantity ?? "0", costBasis: existing?.cost_basis ?? "0" });
       const inserted = await client.query("INSERT INTO orders(simulation_id,decision_id,symbol,side,quantity,status) VALUES($1,$2,$3,$4,$5,'accepted') RETURNING id", [order.simulationId, order.decisionId, order.symbol, order.side, validated.quantity]);
       const orderId = inserted.rows[0].id as string;
       const fill = await client.query("INSERT INTO fills(order_id,simulation_id,symbol,side,quantity,price,fee) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id", [orderId, order.simulationId, order.symbol, order.side, validated.quantity, validated.price, validated.fee]);
-      const cashMovement = order.side === "buy" ? new Decimal(validated.notional).plus(validated.fee).negated() : new Decimal(validated.notional).minus(validated.fee);
+      const cashMovement = order.side === "buy" ? new Decimal(validated.notional).negated() : new Decimal(validated.notional);
       await client.query("INSERT INTO ledger_entries(simulation_id,fill_id,asset,amount,kind) VALUES($1,$2,'USDT',$3,'trade_cash'),($1,$2,$4,$5,'asset_movement'),($1,$2,'USDT',$6,'fee')", [order.simulationId, fill.rows[0].id, cashMovement.toFixed(), instrument.baseAsset, order.side === "buy" ? validated.quantity : `-${validated.quantity}`, `-${validated.fee}`]);
       await client.query("INSERT INTO positions(simulation_id,symbol,quantity,cost_basis) VALUES($1,$2,$3,$4) ON CONFLICT(simulation_id,symbol) DO UPDATE SET quantity=EXCLUDED.quantity,cost_basis=EXCLUDED.cost_basis,created_at=now()", [order.simulationId, order.symbol, accounting.positionQuantity, accounting.costBasis]);
       if (order.side === "sell") await client.query("INSERT INTO ledger_entries(simulation_id,fill_id,asset,amount,kind) VALUES($1,$2,'USDT',$3,'realized_profit')", [order.simulationId, fill.rows[0].id, accounting.realizedProfit]);

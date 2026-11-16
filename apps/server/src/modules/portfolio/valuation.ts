@@ -8,10 +8,10 @@ export async function refreshValuation(pool: Pool, simulationId: string, now = n
     await client.query("BEGIN");
     const simulation = await client.query("SELECT starting_cash::text FROM simulations WHERE id=$1 AND status='active'", [simulationId]);
     if (!simulation.rowCount) throw new Error("Active simulation not found");
-    const balance = await client.query("SELECT COALESCE(sum(amount),0)::text AS cash FROM ledger_entries WHERE simulation_id=$1 AND asset='USDT' AND kind IN ('initial_funding','trade_cash')", [simulationId]);
+    const balance = await client.query("SELECT COALESCE(sum(amount) FILTER (WHERE kind IN ('initial_funding','trade_cash','fee')),0)::text AS cash FROM ledger_entries WHERE simulation_id=$1 AND asset='USDT'", [simulationId]);
     const positions = await client.query("SELECT symbol,quantity::text,cost_basis::text FROM positions WHERE simulation_id=$1 AND quantity <> 0", [simulationId]);
     const symbols = positions.rows.map((position) => position.symbol as string);
-    const quoteResult = symbols.length ? await client.query("SELECT DISTINCT ON(symbol) symbol,bid::text,ask::text,bid_size::text AS \"bidSize\",ask_size::text AS \"askSize\",observed_at AS \"observedAt\",observed_at AS \"receivedAt\" FROM quote_samples WHERE symbol=ANY($1) ORDER BY symbol,observed_at DESC", [symbols]) : { rows: [] };
+    const quoteResult = symbols.length ? await client.query("SELECT DISTINCT ON(symbol) symbol,bid::text,ask::text,bid_size::text AS \"bidSize\",ask_size::text AS \"askSize\",observed_at AS \"observedAt\",received_at AS \"receivedAt\" FROM quote_samples WHERE symbol=ANY($1) ORDER BY symbol,received_at DESC", [symbols]) : { rows: [] };
     const quotes = quoteResult.rows.map((quote) => ({ ...quote, observedAt: new Date(quote.observedAt).toISOString(), receivedAt: new Date(quote.receivedAt).toISOString() })) as Quote[];
     const valuation = valuePortfolio({ cash: balance.rows[0].cash, positions: positions.rows.map((position) => ({ symbol: position.symbol as string, quantity: position.quantity as string, costBasis: position.cost_basis as string })) }, quotes, simulation.rows[0].starting_cash, "0", now.getTime());
     const realized = await client.query("SELECT COALESCE(sum(amount),0)::text AS profit FROM ledger_entries WHERE simulation_id=$1 AND kind='realized_profit'", [simulationId]);

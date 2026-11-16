@@ -21,4 +21,11 @@ describe("local read API", () => {
     expect(invalid.statusCode).toBe(400);
     await app.close();
   });
+  it("keeps market health degraded while any configured symbol lacks fresh data", () => {
+    const events = new EventHub();
+    events.publishMarket({ type: "health", health: { status: "healthy" } });
+    events.publishMarket({ type: "health", health: { status: "degraded", symbol: "BTCUSDT" } });
+    events.publishMarket({ type: "health", health: { status: "healthy", symbol: "ETHUSDT" } });
+    expect(events.health()).toBe("degraded");
+  });
 });

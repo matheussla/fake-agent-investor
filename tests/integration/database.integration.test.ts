@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { createDatabase } from "../../apps/server/src/db/client.js";
-import { createSimulation } from "../../apps/server/src/modules/simulations/service.js";
+import { createSimulation, ensureActiveSimulation } from "../../apps/server/src/modules/simulations/service.js";
 
 const connection = process.env.TEST_DATABASE_URL ?? "postgres://paper:paper@127.0.0.1:5433/paper_investor_test";
 if (!new URL(connection).pathname.endsWith("/paper_investor_test")) throw new Error("Integration tests require isolated paper_investor_test database");
@@ -26,5 +26,20 @@ describe("PostgreSQL persistence", () => {
     await expect(createSimulation(db)).rejects.toThrow();
     const activeCount = await pool.query("SELECT count(*)::int AS value FROM simulations WHERE status = 'active'");
     expect(activeCount.rows[0]?.value).toBe(1);
+  });
+
+  it("creates the initial paused simulation exactly once when the application starts", async () => {
+    const initial = await ensureActiveSimulation(db);
+    const same = await ensureActiveSimulation(db);
+    expect(same.id).toBe(initial.id);
+    const state = await pool.query("SELECT paused FROM agent_state WHERE simulation_id=$1", [initial.id]);
+    expect(state.rows[0].paused).toBe(true);
+  });
+
+  it("rejects mutation and deletion of funding ledger evidence", async () => {
+    const simulation = await createSimulation(db);
+    const entry = await pool.query("SELECT id FROM ledger_entries WHERE simulation_id=$1 LIMIT 1", [simulation.id]);
+    await expect(pool.query("UPDATE ledger_entries SET amount=0 WHERE id=$1", [entry.rows[0].id])).rejects.toThrow("ledger entries are immutable");
+    await expect(pool.query("DELETE FROM ledger_entries WHERE id=$1", [entry.rows[0].id])).rejects.toThrow("ledger entries are immutable");
   });
 });

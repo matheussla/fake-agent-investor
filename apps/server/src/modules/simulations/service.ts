@@ -24,3 +24,16 @@ export async function getActiveSimulation(db: Database): Promise<Simulation | nu
   const [simulation] = await db.select().from(simulations).where(eq(simulations.status, "active")).limit(1);
   return simulation ? { id: simulation.id, status: simulation.status } : null;
 }
+
+export async function ensureActiveSimulation(db: Database): Promise<Simulation> {
+  const current = await getActiveSimulation(db);
+  if (current) return current;
+  try { return await createSimulation(db); }
+  catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error && error.code === "23505") {
+      const raced = await getActiveSimulation(db);
+      if (raced) return raced;
+    }
+    throw error;
+  }
+}

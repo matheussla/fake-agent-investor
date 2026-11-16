@@ -53,7 +53,7 @@ export const equityHistory = pgTable("equity_history", {
 }, (t) => [unique("equity_sim_minute").on(t.simulationId, t.observedAt), index("equity_sim_time").on(t.simulationId, t.observedAt)]);
 
 export const quoteSamples = pgTable("quote_samples", {
-  id: uuid("id").defaultRandom().primaryKey(), symbol: text("symbol").notNull(), bid: money("bid").notNull(), ask: money("ask").notNull(), bidSize: money("bid_size").notNull(), askSize: money("ask_size").notNull(), observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  id: uuid("id").defaultRandom().primaryKey(), symbol: text("symbol").notNull(), bid: money("bid").notNull(), ask: money("ask").notNull(), bidSize: money("bid_size").notNull(), askSize: money("ask_size").notNull(), observedAt: timestamp("observed_at", { withTimezone: true }).notNull(), receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [unique("quote_symbol_observed").on(t.symbol, t.observedAt), index("quote_observed").on(t.observedAt)]);
 
 export const candles = pgTable("candles", {

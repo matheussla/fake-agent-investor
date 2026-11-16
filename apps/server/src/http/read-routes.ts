@@ -26,13 +26,16 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
   };
 
   app.get("/api/portfolio", async (request, reply) => paged(request, reply, async (id) => {
-    const [cash, positions, latest, realized] = await Promise.all([
-      pool.query("SELECT COALESCE(sum(amount),0)::text AS cash FROM ledger_entries WHERE simulation_id=$1 AND asset='USDT' AND kind IN ('initial_funding','trade_cash')", [id]),
+    const [cash, positions, latest, realized, stalePositions] = await Promise.all([
+      pool.query("SELECT COALESCE(sum(amount) FILTER (WHERE kind IN ('initial_funding','trade_cash','fee')),0)::text AS cash FROM ledger_entries WHERE simulation_id=$1 AND asset='USDT'", [id]),
       pool.query("SELECT symbol,quantity::text,cost_basis::text FROM positions WHERE simulation_id=$1 AND quantity<>0 ORDER BY symbol", [id]),
       pool.query("SELECT equity::text,observed_at FROM equity_history WHERE simulation_id=$1 ORDER BY observed_at DESC LIMIT 1", [id]),
       pool.query("SELECT COALESCE(sum(amount),0)::text AS profit FROM ledger_entries WHERE simulation_id=$1 AND kind='realized_profit'", [id]),
+      pool.query("SELECT EXISTS(SELECT 1 FROM positions p WHERE p.simulation_id=$1 AND p.quantity<>0 AND NOT EXISTS(SELECT 1 FROM quote_samples q WHERE q.symbol=p.symbol AND q.observed_at > now()-interval '5 seconds' AND q.received_at > now()-interval '5 seconds')) AS stale", [id]),
     ]);
-    return { simulationId: id, cash: cash.rows[0].cash, positions: positions.rows, equity: latest.rows[0]?.equity ?? null, equityObservedAt: latest.rows[0]?.observed_at ?? null, realizedProfit: realized.rows[0].profit, dataStatus: latest.rows[0] ? "available" : "unavailable" };
+    const age = latest.rows[0] ? Date.now() - Date.parse(latest.rows[0].observed_at) : Infinity;
+    const dataStatus = !latest.rows[0] ? "unavailable" : stalePositions.rows[0].stale || age > 65_000 ? "stale" : "available";
+    return { simulationId: id, cash: cash.rows[0].cash, positions: positions.rows, equity: latest.rows[0]?.equity ?? null, equityObservedAt: latest.rows[0]?.observed_at ?? null, realizedProfit: realized.rows[0].profit, dataStatus };
   }));
   app.get("/api/positions", async (request, reply) => paged(request, reply, async (id) => (await pool.query("SELECT symbol,quantity::text,cost_basis::text FROM positions WHERE simulation_id=$1 AND quantity<>0 ORDER BY symbol", [id])).rows));
   app.get("/api/equity", async (request, reply) => {
@@ -51,7 +54,7 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
     let database: "healthy" | "unavailable" = "healthy";
     try { await pool.query("SELECT 1"); } catch { database = "unavailable"; }
     const simulation = await pool.query("SELECT id,status FROM simulations ORDER BY created_at DESC LIMIT 1").catch(() => ({ rows: [] }));
-    return reply.code(database === "healthy" ? 200 : 503).send({ database, market: "unavailable", provider: "unavailable", simulation: simulation.rows[0] ?? null });
+    return reply.code(database === "healthy" ? 200 : 503).send({ database, market: events.health(), provider: "unavailable", simulation: simulation.rows[0] ?? null });
   });
   app.get("/api/simulations", async () => (await pool.query("SELECT id,status,starting_cash::text,created_at,archived_at FROM simulations ORDER BY created_at DESC LIMIT 100")).rows);
   app.get("/api/events", async (request, reply) => {
