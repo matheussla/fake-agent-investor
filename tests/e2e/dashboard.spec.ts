@@ -16,8 +16,9 @@ test.beforeEach(async ({ page }) => {
     if (url.pathname === "/api/candles") return route.fulfill({ json: [{ symbol: "BTCUSDT", openTime: "2026-11-17T09:59:00.000Z", closeTime: "2026-11-17T10:00:00.000Z", open: "99900", high: "100100", low: "99800", close: "100000", volume: "12", closed: true }] });
     if (url.pathname === "/api/trades") return route.fulfill({ json: [{ id: "trade-1", symbol: "BTCUSDT", side: "buy", quantity: "0.02", status: "filled", created_at: "2026-11-17T10:00:00.000Z", price: "90000", fee: "1.8" }] });
     if (url.pathname === "/api/decisions") return route.fulfill({ json: [{ id: "decision-1", request_id: "request-1", result: { decision: { action: "hold" } }, created_at: "2026-11-17T10:00:00.000Z" }] });
-    if (url.pathname === "/api/health") return route.fulfill({ json: { database: "healthy", market: "healthy", provider: "unavailable", simulation: { id: activeId, status: "active" } } });
-    if (url.pathname === "/api/settings") return route.fulfill({ json: { version: 1, values: { provider: "grok", model: "grok-4.3", assets: ["BTCUSDT"], feeRate: "0.001", slippageBps: 5 } } });
+    if (url.pathname === "/api/health") return route.fulfill({ json: { database: "healthy", market: "healthy", agent: { paused: true, generation: 0, cycleRunning: false, pauseReason: null }, usage: { dailyAttempts: 0, providers: {} }, providers: { grok: "configured", codex: "disabled_isolation_unverified" }, simulation: { id: activeId, status: "active" } } });
+    if (url.pathname === "/api/prompts") return route.fulfill({ json: [{ id: "prompt-1", name: "Default", version: 1, content: "hold", active: true, created_at: "2026-11-17T10:00:00.000Z" }] });
+    if (url.pathname === "/api/settings") return route.fulfill({ json: { version: 1, values: { provider: "grok", model: "grok-4.3", assets: ["BTCUSDT"], cadenceSeconds: 300, feeRate: "0.001", slippageBps: 5, maximumBuyPercent: "0.10", maximumAssetExposure: "0.25", maximumTotalExposure: "0.50", dailyLossLimit: "0.05" } } });
     return route.fulfill({ status: 404, json: { error: "missing fixture" } });
   });
 });
@@ -35,7 +36,7 @@ test("shows funded portfolio, stale state, charts, and trading evidence", async 
 
 test("loads archived history and fits a mobile viewport", async ({ page }) => {
   await page.goto("/");
-  await page.getByLabel("Simulation").selectOption(archivedId);
+  await page.getByLabel("Simulation", { exact: true }).selectOption(archivedId);
   await expect(page.getByText("No open positions")).toBeVisible();
   await expect(page.getByText("PAPER TRADING")).toBeVisible();
   await expect(page.locator("body")).toHaveJSProperty("scrollWidth", await page.locator("body").evaluate((body) => body.clientWidth));

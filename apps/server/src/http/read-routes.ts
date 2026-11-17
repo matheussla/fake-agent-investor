@@ -53,14 +53,25 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
     return (await pool.query("SELECT symbol,open_time AS \"openTime\",close_time AS \"closeTime\",open::text,high::text,low::text,close::text,volume::text,closed FROM candles WHERE symbol=$1 AND closed=true AND ($2::timestamptz IS NULL OR open_time >= $2) AND ($3::timestamptz IS NULL OR open_time <= $3) ORDER BY open_time DESC LIMIT 1000", [parsed.data.symbol, parsed.data.from ?? null, parsed.data.to ?? null])).rows.reverse();
   });
   app.get("/api/trades", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT o.id,o.symbol,o.side,o.quantity::text,o.status,o.reason,o.created_at,f.price::text,f.fee::text FROM orders o LEFT JOIN fills f ON f.order_id=o.id WHERE o.simulation_id=$1 AND ($2::timestamptz IS NULL OR o.created_at < $2) ORDER BY o.created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
-  app.get("/api/decisions", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT id,request_id,result,failure,input_snapshot,created_at FROM decisions WHERE simulation_id=$1 AND ($2::timestamptz IS NULL OR created_at < $2) ORDER BY created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
+  app.get("/api/decisions", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT id,request_id,result,failure,input_snapshot,prompt_version,created_at FROM decisions WHERE simulation_id=$1 AND ($2::timestamptz IS NULL OR created_at < $2) ORDER BY created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
   app.get("/api/prompts", async (request, reply) => paged(request, reply, async (id, limit) => (await pool.query("SELECT id,name,version,content,active,created_at FROM prompts WHERE simulation_id=$1 ORDER BY name,version DESC LIMIT $2", [id, limit])).rows));
   app.get("/api/settings", async (request, reply) => paged(request, reply, async (id) => (await pool.query("SELECT version,values,created_at FROM configurations WHERE simulation_id=$1 ORDER BY version DESC LIMIT 1", [id])).rows[0] ?? null));
   app.get("/api/health", async (_request, reply) => {
     let database: "healthy" | "unavailable" = "healthy";
     try { await pool.query("SELECT 1"); } catch { database = "unavailable"; }
     const simulation = await pool.query("SELECT id,status FROM simulations ORDER BY created_at DESC LIMIT 1").catch(() => ({ rows: [] }));
-    return reply.code(database === "healthy" ? 200 : 503).send({ database, market: events.health(), provider: "unavailable", simulation: simulation.rows[0] ?? null });
+    const simulationId = simulation.rows[0]?.id as string | undefined;
+    const [agent, usage] = await Promise.all([
+      simulationId ? pool.query("SELECT paused,generation,cycle_running,pause_reason FROM agent_state WHERE simulation_id=$1", [simulationId]) : Promise.resolve({ rows: [] }),
+      pool.query("SELECT provider,attempts FROM daily_usage WHERE utc_date=$1", [new Date().toISOString().slice(0, 10)]).catch(() => ({ rows: [] })),
+    ]);
+    const providerUsage = Object.fromEntries(usage.rows.map((row) => [row.provider, row.attempts]));
+    return reply.code(database === "healthy" ? 200 : 503).send({
+      database, market: events.health(), simulation: simulation.rows[0] ?? null,
+      agent: agent.rows[0] ? { paused: agent.rows[0].paused, generation: agent.rows[0].generation, cycleRunning: agent.rows[0].cycle_running, pauseReason: agent.rows[0].pause_reason } : null,
+      usage: { dailyAttempts: providerUsage.all ?? 0, providers: Object.fromEntries(Object.entries(providerUsage).filter(([provider]) => provider !== "all")) },
+      providers: { grok: process.env.XAI_API_KEY ? "configured" : "missing_credentials", codex: "disabled_isolation_unverified" },
+    });
   });
   app.get("/api/simulations", async () => (await pool.query("SELECT id,status,starting_cash::text,created_at,archived_at FROM simulations ORDER BY created_at DESC LIMIT 100")).rows);
   app.get("/api/events", async (request, reply) => {

@@ -3,10 +3,11 @@ export interface EquityPoint { cash: string; equity: string; realized_profit: st
 export interface QuoteRow { symbol: string; bid: string; ask: string; bidSize: string; askSize: string; observed_at: string; }
 export interface CandleRow { symbol: string; openTime: string; closeTime: string; open: string; high: string; low: string; close: string; volume: string; closed: boolean; }
 export interface TradeRow { id: string; symbol: string; side: "buy" | "sell"; quantity: string; status: string; reason?: string; created_at: string; price?: string; fee?: string; }
-export interface DecisionRow { id: string; request_id: string; result?: unknown; failure?: string; created_at: string; }
+export interface DecisionRow { id: string; request_id: string; result?: unknown; failure?: string; input_snapshot?: unknown; prompt_version?: number; created_at: string; }
 export interface SimulationRow { id: string; status: "active" | "archived"; starting_cash: string; created_at: string; }
-export interface HealthData { database: string; market: string; provider: string; simulation: { id: string; status: string } | null; }
-export interface SettingsData { version: number; values: { provider: string; model: string; assets: string[]; feeRate: string; slippageBps: number }; }
+export interface PromptRow { id: string; name: string; version: number; content: string; active: boolean; created_at: string; }
+export interface HealthData { database: string; market: string; agent: { paused: boolean; generation: number; cycleRunning: boolean; pauseReason: string | null } | null; usage: { dailyAttempts: number; providers: Record<string, number> }; providers: { grok: string; codex: string }; simulation: { id: string; status: string } | null; }
+export interface SettingsData { version: number; values: { provider: string; model: string; assets: string[]; cadenceSeconds: number; feeRate: string; slippageBps: number; maximumBuyPercent: string; maximumAssetExposure: string; maximumTotalExposure: string; dailyLossLimit: string }; }
 
 export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin", signal, headers: { accept: "application/json" } });
