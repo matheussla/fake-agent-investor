@@ -1,7 +1,7 @@
 import type { Pool } from "pg";
 import { BinanceMarketDataProvider } from "./ingestion.js";
 import { persistMarketUpdate, pruneMarketHistory } from "./retention.js";
-import { refreshValuation } from "../portfolio/valuation.js";
+import { enforceDailyLoss } from "../risk/daily-loss.js";
 import type { EventHub } from "../../http/sse.js";
 
 const symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
@@ -33,7 +33,7 @@ export function startMarketServices(pool: Pool, events: EventHub, provider = new
         void persistMarketUpdate(pool, update).catch((error: unknown) => console.error("Market persistence failed", error));
       });
       const active = await pool.query("SELECT id FROM simulations WHERE status='active' LIMIT 1");
-      if (active.rows[0]) await refreshValuation(pool, active.rows[0].id as string);
+      if (active.rows[0]) await enforceDailyLoss(pool, active.rows[0].id as string);
       retryCount = 0;
     } catch (error) {
       if (stopped) return;
@@ -47,7 +47,7 @@ export function startMarketServices(pool: Pool, events: EventHub, provider = new
   const valueTimer = setInterval(async () => {
     try {
       const active = await pool.query("SELECT id FROM simulations WHERE status='active' LIMIT 1");
-      if (active.rows[0]) await refreshValuation(pool, active.rows[0].id as string);
+      if (active.rows[0]) await enforceDailyLoss(pool, active.rows[0].id as string);
     } catch (error) { console.error("Portfolio valuation failed", error); }
   }, 60_000);
   const retentionTimer = setInterval(() => { void pruneMarketHistory(pool).catch((error: unknown) => console.error("Market retention failed", error)); }, 60 * 60_000);

@@ -14,6 +14,8 @@ let provider: PaperExecutionProvider;
 beforeEach(async () => {
   await pool.query("TRUNCATE simulations CASCADE");
   simulationId = (await createSimulation(db)).id;
+  const now = new Date();
+  await pool.query("INSERT INTO quote_samples(symbol,bid,ask,bid_size,ask_size,observed_at,received_at) VALUES('BTCUSDT',100,100.1,3,3,$1,$1)", [now]);
   decisionId = (await pool.query("INSERT INTO decisions(simulation_id,request_id,run_generation,configuration_version,prompt_version,input_snapshot) VALUES($1,$2,0,1,1,'{}') RETURNING id", [simulationId, crypto.randomUUID()])).rows[0].id;
   provider = new PaperExecutionProvider(pool, market);
 });
