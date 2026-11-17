@@ -68,6 +68,15 @@ export class AgentService {
     return this.executeCycle(claimed);
   }
 
+  async enqueueRunOnce(requestId: string): Promise<DecisionRecord> {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId)) throw new Error("Invalid idempotency key");
+    const claimed = await this.claimCycle(requestId, true);
+    if ("existing" in claimed) return claimed.existing;
+    void this.executeCycle(claimed).catch((error: unknown) => console.error("Run Once failed", safeFailure(error)));
+    const row = await this.options.pool.query("SELECT id,simulation_id,request_id,result,failure FROM decisions WHERE id=$1", [claimed.decisionId]);
+    return toDecisionRecord(row.rows[0]);
+  }
+
   async close(): Promise<void> {
     for (const simulationId of this.controllers.keys()) this.controllers.get(simulationId)?.abort(new DOMException("Server shutting down", "AbortError"));
     for (const simulationId of this.timers.keys()) this.clearTimer(simulationId);

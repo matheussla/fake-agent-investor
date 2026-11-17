@@ -32,3 +32,15 @@ export async function activatePrompt(db: Database, promptVersionId: string): Pro
     await tx.update(prompts).set({ active: true }).where(eq(prompts.id, target.id));
   });
 }
+
+export async function activatePromptVersion(db: Database, promptId: string, promptVersionId: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [prompt] = await tx.select().from(prompts).where(eq(prompts.id, promptId)).limit(1);
+    const [target] = await tx.select().from(prompts).where(eq(prompts.id, promptVersionId)).limit(1);
+    if (!prompt || !target || prompt.simulationId !== target.simulationId || prompt.name !== target.name) throw new Error("Prompt version does not belong to this prompt");
+    const [simulation] = await tx.select().from(simulations).where(and(eq(simulations.id, prompt.simulationId), eq(simulations.status, "active"))).limit(1);
+    if (!simulation) throw new Error("Simulation is not active");
+    await tx.update(prompts).set({ active: false }).where(eq(prompts.simulationId, prompt.simulationId));
+    await tx.update(prompts).set({ active: true }).where(eq(prompts.id, target.id));
+  });
+}
