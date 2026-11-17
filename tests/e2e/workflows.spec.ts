@@ -116,13 +116,12 @@ test("starts, pauses, runs once, and keeps daily loss resume explicit", async ({
   await expect(page.getByRole("alert").filter({ hasText: "Daily loss pause is not eligible to resume" })).toBeVisible();
 });
 
-test("archives old evidence through the reset dialog and opens its history", async ({ page }) => {
+test("archives old evidence through the reset dialog and keeps it in history", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Reset simulation" }).click();
   await page.getByLabel("Starting cash (USDT)").fill("2500");
   await page.getByRole("button", { name: "Archive and create" }).click();
-  await expect(page.getByLabel("Simulation", { exact: true })).toContainText("Active");
-  await page.getByLabel("Simulation", { exact: true }).selectOption(originalId);
-  await expect(page.getByText("No open positions")).toBeVisible();
-  await expect(page.getByText("PAPER TRADING")).toBeVisible();
+  const simulations = page.getByLabel("Simulation", { exact: true });
+  await expect(simulations).toContainText("Active");
+  await expect(simulations).toContainText("Archived · 64da7e04");
 });

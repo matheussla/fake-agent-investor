@@ -3,7 +3,7 @@ import type { DecisionInput, DecisionProvider, ExecutionProvider } from "../../p
 import { createDatabase } from "../../apps/server/src/db/client.js";
 import { AgentService } from "../../apps/server/src/modules/agent/service.js";
 import { reserveAttempt } from "../../apps/server/src/modules/agent/usage.js";
-import { createSimulation } from "../../apps/server/src/modules/simulations/service.js";
+import { createSimulation, resetSimulation } from "../../apps/server/src/modules/simulations/service.js";
 
 const { db, pool } = createDatabase("postgres://paper:paper@127.0.0.1:5433/paper_investor_test");
 let simulationId: string;
@@ -53,6 +53,23 @@ describe("persistent agent lifecycle", () => {
     expect(provider.decide).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes claims across server instances and rejects a late result after reset", async () => {
+    let release!: (value: { decision: { action: "hold"; explanation: string } }) => void;
+    const provider: DecisionProvider = { decide: vi.fn(() => new Promise((resolve) => { release = resolve; })) };
+    const first = service(provider);
+    const second = service(provider);
+    const pending = first.agent.runOnce("388ae885-6445-4fd8-9167-e79de15d1e33");
+    await vi.waitFor(() => expect(provider.decide).toHaveBeenCalledTimes(1));
+
+    await expect(second.agent.runOnce("fd5e5df1-5eb3-4f50-afac-fab81729926d")).rejects.toThrow(/eligible paused agent|already processing/);
+    await resetSimulation(db, { requestId: "3564c60b-731c-4739-9d0a-cf55c175cd1a", startingCash: "2500" });
+    release({ decision: { action: "hold", explanation: "Late response." } });
+
+    expect(await pending).toMatchObject({ status: "failed", failure: "Decision authorization expired" });
+    expect(first.execution.submit).not.toHaveBeenCalled();
+    expect(second.execution.submit).not.toHaveBeenCalled();
+  });
+
   it("starts on the configured five-minute cadence and pauses explicitly", async () => {
     const { agent } = service(holdProvider());
     const timer = vi.spyOn(globalThis, "setTimeout");
@@ -83,6 +100,7 @@ describe("persistent agent lifecycle", () => {
     for (const requestId of ["d274d16b-0994-4268-95ab-dd1f34fa7c7a", "0a17c8b8-9392-42b4-b263-302c72c4ae4d", "c6370243-9efb-4985-a878-2a9d6926eebc"]) await agent.runOnce(requestId);
     expect((await pool.query("SELECT paused,pause_reason,consecutive_failures FROM agent_state WHERE simulation_id=$1", [simulationId])).rows[0]).toMatchObject({ paused: true, pause_reason: "provider_failures", consecutive_failures: 3 });
     expect((await pool.query("SELECT count(*)::int AS count FROM daily_usage WHERE provider='all'")).rows[0].count).toBe(1);
+    expect((await pool.query("SELECT string_agg(coalesce(failure,''), ' ') AS failures FROM decisions")).rows[0].failures).not.toContain("private provider response body");
   });
 
   it("aborts a provider request at the configured decision deadline", async () => {

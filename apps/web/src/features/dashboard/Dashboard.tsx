@@ -22,18 +22,21 @@ export function Dashboard() {
   const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const selectedSimulationId = useRef("");
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const refresh = useCallback(async (requestedSimulation = simulationId) => {
+  const refresh = useCallback(async (requestedSimulation?: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
     try {
       const simulations = await api<SimulationRow[]>("/api/simulations", controller.signal);
-      const currentId = requestedSimulation || simulations.find((item) => item.status === "active")?.id || simulations[0]?.id || "";
+      if (controller.signal.aborted) return;
+      const selection = requestedSimulation ?? selectedSimulationId.current;
+      const currentId = selection || simulations.find((item) => item.status === "active")?.id || simulations[0]?.id || "";
       if (!currentId) {
-        setData({ ...emptyData, simulations }); setSimulationId(""); setUpdatedAt(new Date()); setError(""); return;
+        setData({ ...emptyData, simulations }); selectedSimulationId.current = ""; setSimulationId(""); setUpdatedAt(new Date()); setError(""); return;
       }
       const paths = ["/api/portfolio", "/api/equity", "/api/markets", "/api/trades", "/api/decisions", "/api/health", "/api/settings"] as const;
       const [portfolio, equity, markets, trades, decisions, prompts, health, settings] = await Promise.all([
@@ -49,13 +52,14 @@ export function Dashboard() {
       const symbols = settings?.values.assets ?? ["BTCUSDT"];
       const symbol = symbols.includes(selectedSymbol) ? selectedSymbol : symbols[0] ?? "BTCUSDT";
       const candles = await api<CandleRow[]>(`/api/candles?symbol=${encodeURIComponent(symbol)}`, controller.signal);
+      if (controller.signal.aborted) return;
       setData({ simulations, portfolio, equity: [...equity].reverse(), markets, trades, decisions, prompts, health, settings, candles });
-      setSimulationId(currentId); setSelectedSymbol(symbol); setUpdatedAt(new Date()); setError("");
+      selectedSimulationId.current = currentId; setSimulationId(currentId); setSelectedSymbol(symbol); setUpdatedAt(new Date()); setError("");
     } catch (cause) {
       if (cause instanceof Error && cause.name === "AbortError") return;
       setError(cause instanceof Error ? cause.message : "Could not load dashboard data");
     } finally { if (!controller.signal.aborted) setLoading(false); }
-  }, [simulationId, selectedSymbol]);
+  }, [selectedSymbol]);
 
   const queueRefresh = useCallback(() => {
     if (refreshTimer.current) return;
@@ -85,7 +89,7 @@ export function Dashboard() {
   const activeSimulation = data.simulations.find((simulation) => simulation.id === simulationId);
 
   return <main className="terminal-shell">
-    <header className="topbar"><a className="brand" href="#top"><span className="brand-icon" aria-hidden="true">P</span><span>Paper Investor<small>MARKET TERMINAL</small></span></a><div className="topbar-status"><span className="paper-label">PAPER TRADING</span><span className="provider-chip">{data.settings?.values.provider ?? "provider"} · {data.settings?.values.model ?? "loading"}</span><span className="connection"><i aria-hidden="true"/> LIVE DATA</span></div><label className="simulation-select"><span className="sr-only">Simulation history</span><select aria-label="Simulation" value={simulationId} onChange={(event) => { const id = event.target.value; setSimulationId(id); void refresh(id); }}><option value="" disabled>Select simulation</option>{data.simulations.map((simulation) => <option key={simulation.id} value={simulation.id}>{simulation.status === "active" ? "Active" : "Archived"} · {simulation.id.slice(0, 8)}</option>)}</select></label></header>
+    <header className="topbar"><a className="brand" href="#top"><span className="brand-icon" aria-hidden="true">P</span><span>Paper Investor<small>MARKET TERMINAL</small></span></a><div className="topbar-status"><span className="paper-label">PAPER TRADING</span><span className="provider-chip">{data.settings?.values.provider ?? "provider"} · {data.settings?.values.model ?? "loading"}</span><span className="connection"><i aria-hidden="true"/> LIVE DATA</span></div><label className="simulation-select"><span className="sr-only">Simulation history</span><select aria-label="Simulation" value={simulationId} onChange={(event) => { selectedSimulationId.current = event.target.value; setSimulationId(event.target.value); void refresh(event.target.value); }}><option value="" disabled>Select simulation</option>{data.simulations.map((simulation) => <option key={simulation.id} value={simulation.id}>{simulation.status === "active" ? "Active" : "Archived"} · {simulation.id.slice(0, 8)}</option>)}</select></label></header>
     <div className="dashboard-content" id="top">
       <div className="page-title"><div><p className="eyebrow">PORTFOLIO OVERVIEW</p><h1>Trading dashboard</h1><p className="subtitle">Paper execution · simulated balances only</p></div><div className="last-update">{updatedAt ? `Updated ${updatedAt.toLocaleTimeString()}` : "Connecting…"}</div></div>
       <nav className="section-nav" aria-label="Dashboard sections"><a href="#agent-controls">Agent</a><a href="#prompt-editor">Prompts</a><a href="#settings">Settings</a><a href="#simulation-reset">Simulation</a></nav>
@@ -104,7 +108,7 @@ export function Dashboard() {
       <div className="chart-grid"><EquityChart points={data.equity}/><div className="market-chart-wrap"><label className="market-symbol-select">Market<select value={selectedSymbol} onChange={(event) => { const symbol = event.target.value; setSelectedSymbol(symbol); void api<CandleRow[]>(`/api/candles?symbol=${encodeURIComponent(symbol)}`).then((candles) => setData((current) => ({ ...current, candles }))).catch(() => setError("Could not load market candles")); }} aria-label="Market chart symbol">{symbols.map((symbol) => <option key={symbol}>{symbol}</option>)}</select></label><MarketChart symbol={selectedSymbol} candles={data.candles}/></div></div>
 
       <div className="content-grid"><div className="main-column"><Positions portfolio={data.portfolio}/><History trades={data.trades}/><p className="assumptions"><strong>Simulation assumptions</strong> Complete fills · configured fees · configured slippage · sell execution performance uses bid-side prices.</p></div><aside className="side-column"><Health health={data.health} settings={data.settings} updatedAt={updatedAt}/><Activity decisions={data.decisions}/><section className="panel market-snapshot"><div className="panel-heading"><div><p className="eyebrow">LIVE QUOTES</p><h2>Bid / ask</h2></div></div>{data.markets.length ? data.markets.map((quote) => <div className="quote-row" key={quote.symbol}><strong>{quote.symbol}</strong><span>{quote.bid} / {quote.ask}</span></div>) : <p className="empty">Waiting for exchange quotes</p>}</section></aside></div>
-      <div className="workflow-grid"><Controls health={data.health} settings={data.settings} onRefresh={() => void refresh()}/><PromptEditor prompts={data.prompts} inFlightVersion={inFlightPromptVersion} onRefresh={() => void refresh()}/><Settings settings={data.settings} health={data.health} portfolio={data.portfolio} onRefresh={() => void refresh()}/><ResetDialog activeSimulation={activeSimulation} onReset={() => { setSimulationId(""); void refresh(""); }}/></div>
+      <div className="workflow-grid"><Controls health={data.health} settings={data.settings} onRefresh={() => void refresh()}/><PromptEditor prompts={data.prompts} inFlightVersion={inFlightPromptVersion} onRefresh={() => void refresh()}/><Settings settings={data.settings} health={data.health} portfolio={data.portfolio} onRefresh={() => void refresh()}/><ResetDialog activeSimulation={activeSimulation} onReset={() => { selectedSimulationId.current = ""; setSimulationId(""); void refresh(""); }}/></div>
       <footer className="footer-note">Market history is for display. Rounded chart values never enter trade calculations.</footer>
     </div>
   </main>;
