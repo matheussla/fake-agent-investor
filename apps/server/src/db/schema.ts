@@ -66,7 +66,7 @@ export const operationalEvents = pgTable("operational_events", {
 }, (t) => [index("events_sim_time").on(t.simulationId, t.createdAt)]);
 
 export const agentState = pgTable("agent_state", {
-  simulationId: uuid("simulation_id").primaryKey().references(() => simulations.id), paused: boolean("paused").notNull().default(true), generation: integer("generation").notNull().default(0), consecutiveFailures: integer("consecutive_failures").notNull().default(0), pauseReason: text("pause_reason"),
+  simulationId: uuid("simulation_id").primaryKey().references(() => simulations.id), paused: boolean("paused").notNull().default(true), generation: integer("generation").notNull().default(0), consecutiveFailures: integer("consecutive_failures").notNull().default(0), pauseReason: text("pause_reason"), cycleRunning: boolean("cycle_running").notNull().default(false), claimedRequestId: uuid("claimed_request_id"),
 });
 
 export const dailyUsage = pgTable("daily_usage", {

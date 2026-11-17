@@ -31,6 +31,7 @@ export class GrokDecisionProvider implements DecisionProvider {
 
   async decide(input: DecisionInput, signal: AbortSignal): Promise<DecisionResult> {
     const started = Date.now();
+    const requestedModel = typeof input.limits === "object" && input.limits !== null && "model" in input.limits && typeof input.limits.model === "string" ? input.limits.model : this.model;
     let outcome: GrokOutcome = "failed";
     let tokens: { inputTokens?: number; outputTokens?: number } = {};
     try {
@@ -38,8 +39,8 @@ export class GrokDecisionProvider implements DecisionProvider {
       if (signal.aborted) throw new DOMException("Decision cancelled", "AbortError");
       const deadline = AbortSignal.any([signal, AbortSignal.timeout(90_000)]);
       const response = this.runGenerate
-        ? await this.runGenerate({ model: this.model, input, signal: deadline })
-        : await generate({ model: this.model, input, signal: deadline }, this.apiKey as string);
+        ? await this.runGenerate({ model: requestedModel, input, signal: deadline })
+        : await generate({ model: requestedModel, input, signal: deadline }, this.apiKey as string);
       let decision;
       try { decision = DecisionSchema.parse(response.output); }
       catch { outcome = "invalid_output"; throw new Error("Invalid structured decision"); }
@@ -58,7 +59,7 @@ export class GrokDecisionProvider implements DecisionProvider {
       const safeMessage = outcome === "quota_rejected" ? "Grok request quota unavailable" : outcome === "cancelled" ? "Grok request cancelled or timed out" : outcome === "invalid_output" ? "Grok returned an invalid decision" : "Grok request failed";
       throw Object.assign(new Error(safeMessage), { code: outcome });
     } finally {
-      const attempt = { model: this.model, latencyMs: Date.now() - started, outcome, ...tokens };
+      const attempt = { model: requestedModel, latencyMs: Date.now() - started, outcome, ...tokens };
       await this.recordAttempt?.(attempt);
     }
   }

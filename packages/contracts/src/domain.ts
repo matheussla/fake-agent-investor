@@ -34,6 +34,7 @@ export interface PromptVersion { id: string; simulationId: string; name: string;
 export interface SettingsUpdate { simulationId: string; expectedVersion: number; values: Record<string, unknown>; }
 export interface ConfigurationVersion { id: string; simulationId: string; version: number; values: Record<string, unknown>; }
 export interface ResetSimulationInput extends NewSimulationInput { requestId: string; }
+export interface DecisionRecord { id: string; simulationId: string; requestId: string; status: "pending" | "completed" | "failed"; result?: Decision; failure?: string; }
 
 export interface MarketDataProvider {
   instruments(signal: AbortSignal): Promise<Instrument[]>;

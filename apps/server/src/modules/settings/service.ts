@@ -20,7 +20,7 @@ export async function updateSettings(db: Database, input: SettingsUpdate): Promi
     const [simulation] = await tx.select().from(simulations).where(and(eq(simulations.id, input.simulationId), eq(simulations.status, "active"))).limit(1);
     if (!simulation) throw new Error("Simulation is not active");
     const [state] = await tx.select().from(agentState).where(eq(agentState.simulationId, input.simulationId)).for("update").limit(1);
-    if (!state?.paused) throw new Error("Settings can only change while the agent is paused");
+    if (!state?.paused || state.cycleRunning) throw new Error("Settings can only change while the agent is paused and idle");
     const [current] = await tx.select().from(configurations).where(eq(configurations.simulationId, input.simulationId)).orderBy(desc(configurations.version)).limit(1);
     if (!current || current.version !== input.expectedVersion) throw new Error("Configuration version conflict");
     const held = await tx.select({ symbol: positions.symbol }).from(positions).where(eq(positions.simulationId, input.simulationId));

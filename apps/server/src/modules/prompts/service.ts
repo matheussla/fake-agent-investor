@@ -28,7 +28,7 @@ export async function activatePrompt(db: Database, promptVersionId: string): Pro
     if (!target) throw new Error("Prompt version does not exist");
     const [simulation] = await tx.select().from(simulations).where(and(eq(simulations.id, target.simulationId), eq(simulations.status, "active"))).limit(1);
     if (!simulation) throw new Error("Simulation is not active");
-    await tx.update(prompts).set({ active: false }).where(and(eq(prompts.simulationId, target.simulationId), eq(prompts.name, target.name)));
+    await tx.update(prompts).set({ active: false }).where(eq(prompts.simulationId, target.simulationId));
     await tx.update(prompts).set({ active: true }).where(eq(prompts.id, target.id));
   });
 }
