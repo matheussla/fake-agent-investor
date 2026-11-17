@@ -29,6 +29,11 @@ export interface FillAccountingInput { side: "buy" | "sell"; quantity: string; p
 export interface FillAccountingResult { cash: string; positionQuantity: string; costBasis: string; realizedProfit: string; }
 export interface NewSimulationInput { startingCash: string; }
 export interface Simulation { id: string; status: "active" | "archived"; }
+export interface SavePromptInput { simulationId: string; name: string; content: string; }
+export interface PromptVersion { id: string; simulationId: string; name: string; version: number; content: string; active: boolean; }
+export interface SettingsUpdate { simulationId: string; expectedVersion: number; values: Record<string, unknown>; }
+export interface ConfigurationVersion { id: string; simulationId: string; version: number; values: Record<string, unknown>; }
+export interface ResetSimulationInput extends NewSimulationInput { requestId: string; }
 
 export interface MarketDataProvider {
   instruments(signal: AbortSignal): Promise<Instrument[]>;
