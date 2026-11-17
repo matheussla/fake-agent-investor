@@ -72,6 +72,7 @@ test.beforeEach(async ({ page }) => {
 
 test("saves, versions, and activates named prompts", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await page.getByLabel("Prompt name").fill("Momentum");
   await page.getByLabel("Strategy prompt").fill("Use trend confirmation and respect all risk limits.");
   await page.getByRole("button", { name: "Save new version" }).click();
@@ -83,6 +84,7 @@ test("saves, versions, and activates named prompts", async ({ page }) => {
 
 test("protects held assets and paused-only settings while preserving portfolio state on provider switch", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await page.getByLabel("Markets").fill("ETHUSDT");
   await page.getByLabel("Decision provider").selectOption("codex");
   await page.getByRole("button", { name: "Save settings" }).click();
