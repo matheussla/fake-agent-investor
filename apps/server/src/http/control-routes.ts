@@ -14,6 +14,7 @@ interface ControlDependencies { pool: Pool; db: Database; agent: AgentService; }
 
 export function registerControlRoutes(app: FastifyInstance, { pool, db, agent }: ControlDependencies): void {
   app.addHook("preHandler", async (request, reply) => {
+    if (request.method === "GET") return;
     if (!isSameOriginMutation(request)) return reply.code(403).send({ error: { code: "ORIGIN_REJECTED", message: "Explicit same-origin JSON request required" } });
   });
 

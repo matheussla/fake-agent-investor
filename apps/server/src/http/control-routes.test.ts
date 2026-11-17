@@ -10,6 +10,13 @@ const withoutOrigin = Object.fromEntries(Object.entries(headers).filter(([key]) 
 describe("local control API protection", () => {
   afterEach(() => vi.clearAllMocks());
 
+  it("allows same-origin read requests when control routes are registered", async () => {
+    const app = buildApp(pool as never, new EventHub(), { db: {} as never, agent: agent as never });
+    const response = await app.inject({ method: "GET", url: "/api/health", headers: { host: "127.0.0.1:3000", origin: "http://127.0.0.1:3000" } });
+    expect(response.statusCode).toBe(200);
+    await app.close();
+  });
+
   it.each([
     [withoutOrigin],
     [{ ...headers, origin: "null" }],
