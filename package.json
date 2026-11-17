@@ -17,6 +17,9 @@
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @paper-investor/server db:migrate",
     "db:migrate:test": "DATABASE_URL=postgres://paper:paper@127.0.0.1:5433/paper_investor_test pnpm --filter @paper-investor/server db:migrate",
+    "smoke:binance": "pnpm --filter @paper-investor/server smoke:binance",
+    "smoke:grok": "pnpm --filter @paper-investor/server smoke:grok",
+    "smoke:codex": "pnpm --filter @paper-investor/server smoke:codex",
     "build": "pnpm -r build"
   },
   "devDependencies": {
