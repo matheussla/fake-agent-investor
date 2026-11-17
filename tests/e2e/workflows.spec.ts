@@ -99,11 +99,13 @@ test("protects held assets and paused-only settings while preserving portfolio s
   await page.getByRole("button", { name: "Start agent" }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
   await expect(page.getByRole("button", { name: "Pause agent to edit" })).toBeDisabled();
+  await page.getByRole("link", { name: "Dashboard" }).click();
   await expect(page.getByRole("cell", { name: "0.01", exact: true })).toBeVisible();
 });
 
 test("starts, pauses, runs once, and keeps daily loss resume explicit", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Start agent" }).click();
   await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled();
   await page.getByRole("button", { name: "Pause", exact: true }).click();
@@ -120,9 +122,11 @@ test("starts, pauses, runs once, and keeps daily loss resume explicit", async ({
 
 test("archives old evidence through the reset dialog and keeps it in history", async ({ page }) => {
   await page.goto("/");
+  await page.getByRole("link", { name: "Settings" }).click();
   await page.getByRole("button", { name: "Reset simulation" }).click();
-  await page.getByLabel("Starting cash (USDT)").fill("2500");
+  await page.getByLabel("Starting balance (USDT)").fill("2500");
   await page.getByRole("button", { name: "Archive and create" }).click();
+  await page.getByRole("link", { name: "Dashboard" }).click();
   const simulations = page.getByLabel("Simulation", { exact: true });
   await expect(simulations).toContainText("Active");
   await expect(simulations).toContainText("Archived · 64da7e04");

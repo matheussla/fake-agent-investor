@@ -34,7 +34,7 @@ Start the local API and web app:
 pnpm dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API binds to `127.0.0.1:3000`. The initial simulation is funded with 10,000 virtual USDT and starts paused. Configure a prompt and settings, then use the dashboard controls to start the schedule or run one decision. The app continues market ingestion and valuation while the agent is paused.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API binds to `127.0.0.1:3000`. On first run, open Settings and choose the starting virtual USDT balance. That balance stays fixed for the simulation; choose a new balance only when resetting it. Configure trading settings and a strategy prompt, save while the agent is paused, then start or pause the agent from Settings. The app continues market ingestion and valuation while the agent is paused.
 
 To stop PostgreSQL, run `pnpm db:down`. Its Docker volume is retained.
 

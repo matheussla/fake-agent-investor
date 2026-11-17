@@ -1,15 +1,23 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HealthData, PortfolioData, SettingsData } from "../../lib/api.js";
 import { sendControl } from "../../lib/control.js";
 
-export function Settings({ settings, health, portfolio, onRefresh }: { settings: SettingsData | null; health: HealthData | null; portfolio: PortfolioData | null; onRefresh: () => void }) {
+export function Settings({ settings, health, portfolio, simulationId, onRefresh }: { settings: SettingsData | null; health: HealthData | null; portfolio: PortfolioData | null; simulationId: string; onRefresh: () => void }) {
   const [values, setValues] = useState<SettingsData["values"] | null>(settings?.values ?? null);
   const [assetsText, setAssetsText] = useState(settings?.values.assets.join(", ") ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
-  useEffect(() => { if (settings) { setValues(settings.values); setAssetsText(settings.values.assets.join(", ")); } }, [settings]);
-  if (!settings || !values) return <section className="panel workflow-panel" id="settings"><h2>Settings unavailable</h2><p>Load simulation settings before making changes.</p></section>;
+  const syncedConfiguration = useRef(`${simulationId}:${settings?.version ?? "none"}`);
+  useEffect(() => {
+    if (!settings) return;
+    const nextConfiguration = `${simulationId}:${settings.version}`;
+    if (syncedConfiguration.current === nextConfiguration) return;
+    syncedConfiguration.current = nextConfiguration;
+    setValues(settings.values);
+    setAssetsText(settings.values.assets.join(", "));
+  }, [settings, simulationId]);
+  if (!settings || !values) return <section className="panel workflow-panel" id="settings"><h2>Settings unavailable</h2><p>Load simulation settings before making changes.</p><button className="button-secondary" onClick={onRefresh}>Retry</button></section>;
   const paused = !!health?.agent?.paused && !health.agent.cycleRunning;
   const held = portfolio?.positions.map((position) => position.symbol) ?? [];
   const update = (key: keyof SettingsData["values"], value: string | number) => setValues((current) => current ? { ...current, [key]: value } : current);
