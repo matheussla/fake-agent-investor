@@ -7,6 +7,7 @@ import type { EventHub } from "./sse.js";
 
 const pageSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().datetime().optional(), simulationId: z.string().uuid().optional() }).strict();
 const rangeSchema = z.object({ from: z.string().datetime().optional(), to: z.string().datetime().optional(), simulationId: z.string().uuid().optional() }).strict();
+const candleSchema = z.object({ symbol: z.string().regex(/^[A-Z0-9]{2,20}USDT$/), from: z.string().datetime().optional(), to: z.string().datetime().optional() }).strict();
 
 export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: EventHub): void {
   app.addHook("preHandler", async (request, reply) => {
@@ -46,6 +47,11 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
     return result.rows;
   });
   app.get("/api/markets", async (request, reply) => paged(request, reply, async (_id, limit, before) => (await pool.query("SELECT DISTINCT ON(symbol) symbol,bid::text,ask::text,bid_size::text AS \"bidSize\",ask_size::text AS \"askSize\",observed_at FROM quote_samples WHERE ($1::timestamptz IS NULL OR observed_at < $1) ORDER BY symbol,observed_at DESC LIMIT $2", [before ?? null, limit])).rows));
+  app.get("/api/candles", async (request, reply) => {
+    const parsed = candleSchema.safeParse(request.query);
+    if (!parsed.success || (parsed.data.from && parsed.data.to && parsed.data.from > parsed.data.to)) return reply.code(400).send({ error: { code: "INVALID_QUERY", message: "Invalid candle query" } });
+    return (await pool.query("SELECT symbol,open_time AS \"openTime\",close_time AS \"closeTime\",open::text,high::text,low::text,close::text,volume::text,closed FROM candles WHERE symbol=$1 AND closed=true AND ($2::timestamptz IS NULL OR open_time >= $2) AND ($3::timestamptz IS NULL OR open_time <= $3) ORDER BY open_time DESC LIMIT 1000", [parsed.data.symbol, parsed.data.from ?? null, parsed.data.to ?? null])).rows.reverse();
+  });
   app.get("/api/trades", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT o.id,o.symbol,o.side,o.quantity::text,o.status,o.reason,o.created_at,f.price::text,f.fee::text FROM orders o LEFT JOIN fills f ON f.order_id=o.id WHERE o.simulation_id=$1 AND ($2::timestamptz IS NULL OR o.created_at < $2) ORDER BY o.created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
   app.get("/api/decisions", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT id,request_id,result,failure,input_snapshot,created_at FROM decisions WHERE simulation_id=$1 AND ($2::timestamptz IS NULL OR created_at < $2) ORDER BY created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
   app.get("/api/prompts", async (request, reply) => paged(request, reply, async (id, limit) => (await pool.query("SELECT id,name,version,content,active,created_at FROM prompts WHERE simulation_id=$1 ORDER BY name,version DESC LIMIT $2", [id, limit])).rows));

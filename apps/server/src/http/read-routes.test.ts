@@ -19,6 +19,8 @@ describe("local read API", () => {
     expect(health.json()).toMatchObject({ database: "healthy", market: "unavailable" });
     const invalid = await app.inject({ method: "GET", url: "/api/prompts?limit=500", headers });
     expect(invalid.statusCode).toBe(400);
+    const invalidCandle = await app.inject({ method: "GET", url: "/api/candles?symbol=BAD", headers });
+    expect(invalidCandle.statusCode).toBe(400);
     await app.close();
   });
   it("keeps market health degraded while any configured symbol lacks fresh data", () => {
