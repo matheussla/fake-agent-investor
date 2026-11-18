@@ -20,7 +20,9 @@
     "smoke:binance": "pnpm --filter @paper-investor/server smoke:binance",
     "smoke:grok": "pnpm --filter @paper-investor/server smoke:grok",
     "smoke:codex": "pnpm --filter @paper-investor/server smoke:codex",
-    "build": "pnpm -r build"
+    "build": "pnpm -r build",
+    "mcp": "pnpm --silent --filter @paper-investor/server mcp",
+    "smoke:mcp": "pnpm --filter @paper-investor/server smoke:mcp"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",

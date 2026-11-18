@@ -80,6 +80,12 @@ Missing reports are retried through a recovery job. Date filters use your local 
 
 See the [execution and report reference](docs/execution-and-reports.md) for transaction guarantees, report schemas, API endpoints, and historical-data limitations.
 
+## Read-only MCP for AI analysis
+
+Connect a compatible local MCP client to explore reports, trades, agent prompts, configuration history, conversations, and market evidence. The interface includes paginated datasets, complete report retrieval, an analysis guide, a data dictionary, and a prompt for evidence-backed improvement suggestions.
+
+The MCP is ready to connect; it does not automatically connect a client, call a model, change agents, or trade. See the [MCP setup and data guide](docs/mcp.md) for configuration and analysis examples.
+
 ## Run locally
 
 ### Requirements
