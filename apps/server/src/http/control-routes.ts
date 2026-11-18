@@ -66,7 +66,11 @@ export function registerControlRoutes(app: FastifyInstance, { pool, db, agent }:
   app.post("/api/simulations", async (request, reply) => {
     const body = NewSimulationBodySchema.safeParse(request.body);
     if (!body.success) return invalid(reply);
-    try { return reply.code(201).send(await resetSimulation(db, body.data)); }
+    try {
+      const existing = await pool.query("SELECT simulation_id FROM reset_requests WHERE request_id=$1", [body.data.requestId]);
+      if (!existing.rowCount && (await pool.query("SELECT id FROM simulations WHERE status='active'")).rowCount) await agent.pauseAgent("simulation_reset");
+      return reply.code(201).send(await resetSimulation(db, body.data));
+    }
     catch (error) { return sendError(reply, error); }
   });
 }

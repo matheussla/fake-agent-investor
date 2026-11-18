@@ -14,17 +14,21 @@ test.beforeEach(async ({ page }) => {
   await page.route("**/api/**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (url.pathname === "/api/reports") return route.fulfill({ json: [] });
     if (url.pathname === "/api/events") return route.fulfill({ status: 200, headers: { "content-type": "text/event-stream" }, body: "id: initial\nevent: snapshot-required\ndata: {}\n\n" });
     if (url.pathname === "/api/simulations" && request.method() === "GET") return route.fulfill({ json: state.simulations });
     if (url.pathname === "/api/portfolio") return route.fulfill({ json: { simulationId: url.searchParams.get("simulationId") ?? state.activeId, cash: "10000", positions: url.searchParams.get("simulationId") === state.activeId ? [{ symbol: "BTCUSDT", quantity: "0.01", cost_basis: "500" }] : [], equity: "10000", equityObservedAt: new Date().toISOString(), realizedProfit: "0", dataStatus: "available" } });
     if (url.pathname === "/api/equity") return route.fulfill({ json: [] });
+    if (url.pathname === "/api/agents" || url.pathname === "/api/team/runs") return route.fulfill({ json: [] });
+    if (url.pathname === "/api/chat/messages") return route.fulfill({ json: { messages: [], nextCursor: null } });
     if (url.pathname === "/api/markets") return route.fulfill({ json: [{ symbol: "BTCUSDT", bid: "100000", ask: "100010", bidSize: "2", askSize: "2", observed_at: new Date().toISOString() }] });
     if (url.pathname === "/api/candles") return route.fulfill({ json: [] });
+    if (url.pathname === "/api/market-symbols" || url.pathname === "/api/market-candles") return route.fulfill({ json: [] });
     if (url.pathname === "/api/trades") return route.fulfill({ json: [] });
     if (url.pathname === "/api/decisions") return route.fulfill({ json: state.decisions });
     if (url.pathname === "/api/prompts" && request.method() === "GET") return route.fulfill({ json: state.prompts });
     if (url.pathname === "/api/settings" && request.method() === "GET") return route.fulfill({ json: state.settings });
-    if (url.pathname === "/api/health") return route.fulfill({ json: { database: "healthy", market: "healthy", agent: { paused: state.paused, generation: 1, cycleRunning: state.cycleRunning, pauseReason: state.pauseReason }, usage: { dailyAttempts: state.decisions.length, providers: { grok: state.decisions.length } }, providers: { grok: "configured", codex: "disabled_isolation_unverified" }, simulation: { id: state.activeId, status: "active" } } });
+    if (url.pathname === "/api/health") return route.fulfill({ json: { database: "healthy", market: "healthy", agent: { paused: state.paused, generation: 1, cycleRunning: state.cycleRunning, pauseReason: state.pauseReason }, usage: { dailyAttempts: state.decisions.length, providers: { grok: state.decisions.length } }, providers: { grok: "configured", codex: "missing_credentials" }, simulation: { id: state.activeId, status: "active" } } });
     if (url.pathname === "/api/prompts" && request.method() === "POST") {
       const body = request.postDataJSON() as { name: string; content: string };
       const version = Math.max(0, ...state.prompts.filter((item) => item.name === body.name).map((item) => item.version)) + 1;
@@ -70,6 +74,22 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
+test("preserves settings drafts across navigation and clicking the current page", async ({ page }) => {
+  let documents = 0;
+  page.on("request", (request) => { if (request.isNavigationRequest() && request.frame() === page.mainFrame()) documents += 1; });
+  await page.goto("/settings");
+  await page.getByLabel("Model", { exact: true }).fill("unsaved-model");
+  await page.getByLabel("Strategy prompt").fill("Unsaved strategy draft");
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByLabel("Model", { exact: true })).toHaveValue("unsaved-model");
+  await page.getByRole("link", { name: "Agents", exact: true }).click();
+  await page.getByRole("link", { name: "Dashboard", exact: true }).click();
+  await page.getByRole("link", { name: "Settings", exact: true }).click();
+  await expect(page.getByLabel("Model", { exact: true })).toHaveValue("unsaved-model");
+  await expect(page.getByLabel("Strategy prompt")).toHaveValue("Unsaved strategy draft");
+  expect(documents).toBe(1);
+});
+
 test("saves, versions, and activates named prompts", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("link", { name: "Settings" }).click();
@@ -87,13 +107,21 @@ test("protects held assets and paused-only settings while preserving portfolio s
   await page.getByRole("link", { name: "Settings" }).click();
   await page.getByLabel("Markets").fill("ETHUSDT");
   await page.getByLabel("Decision provider").selectOption("codex");
+  await expect(page.getByLabel("Model", { exact: true })).toHaveValue("gpt-5.3-codex");
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "cannot remove an asset with a position" })).toBeVisible();
   await page.getByLabel("Markets").fill("BTCUSDT, ETHUSDT");
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByText(/Saved configuration version 2/)).toBeVisible();
-  await expect(page.getByText("Codex is disabled because this CLI cannot prove tool isolation.")).toBeVisible();
+  await expect(page.getByText("Codex is not ready. Add OPENAI_API_KEY to the server environment and restart it.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run once", exact: true })).toBeDisabled();
+  await page.route("**/api/health", (route) => route.fulfill({ json: { database: "healthy", market: "healthy", agent: { paused: true, generation: 1, cycleRunning: false, pauseReason: null }, usage: { dailyAttempts: 0, providers: {} }, providers: { grok: "configured", codex: "configured" }, simulation: { id: originalId, status: "active" } } }));
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Run once", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Start agent", exact: true })).toBeEnabled();
+  await page.unroute("**/api/health");
   await page.getByLabel("Decision provider").selectOption("grok");
+  await expect(page.getByLabel("Model", { exact: true })).toHaveValue("grok-4.3");
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByText(/Saved configuration version 3/)).toBeVisible();
   await page.getByRole("button", { name: "Start agent" }).click();
@@ -113,9 +141,9 @@ test("starts, pauses, runs once, and keeps daily loss resume explicit", async ({
   await expect(page.getByRole("status").filter({ hasText: "accepted and running" })).toBeVisible();
   await page.goto("/");
   // A loss pause is never resumed by a background refresh; Start is an explicit operator action.
-  await page.route("**/api/health", (route) => route.fulfill({ json: { database: "healthy", market: "healthy", agent: { paused: true, generation: 2, cycleRunning: false, pauseReason: "daily_loss_limit" }, usage: { dailyAttempts: 0, providers: {} }, providers: { grok: "configured", codex: "disabled_isolation_unverified" }, simulation: { id: originalId, status: "active" } } }));
+  await page.route("**/api/health", (route) => route.fulfill({ json: { database: "healthy", market: "healthy", agent: { paused: true, generation: 2, cycleRunning: false, pauseReason: "daily_loss_limit" }, usage: { dailyAttempts: 0, providers: {} }, providers: { grok: "configured", codex: "missing_credentials" }, simulation: { id: originalId, status: "active" } } }));
   await page.route("**/api/agent/start", (route) => route.fulfill({ status: 409, json: { error: { message: "Daily loss pause is not eligible to resume" } } }));
-  await page.reload();
+  await page.goto("/settings");
   await page.getByRole("button", { name: "Resume agent" }).click();
   await expect(page.getByRole("alert").filter({ hasText: "Daily loss pause is not eligible to resume" })).toBeVisible();
 });
@@ -130,4 +158,114 @@ test("archives old evidence through the reset dialog and keeps it in history", a
   const simulations = page.getByLabel("Simulation", { exact: true });
   await expect(simulations).toContainText("Active");
   await expect(simulations).toContainText("Archived · 64da7e04");
+});
+
+test("rejects zero funding with a useful message before sending a reset", async ({ page }) => {
+  let resets = 0;
+  page.on("request", (request) => { if (request.method() === "POST" && request.url().endsWith("/api/simulations")) resets += 1; });
+  await page.goto("/settings");
+  await page.getByRole("button", { name: "Reset simulation", exact: true }).click();
+  await page.getByLabel("Starting balance (USDT)").fill("0");
+  await page.getByRole("button", { name: "Archive and create", exact: true }).click();
+  await expect(page.getByRole("alert")).toHaveText("Enter a starting balance greater than 0 USDT.");
+  expect(resets).toBe(0);
+});
+
+test("refreshes mutation results after an older background request finishes", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.getByRole("button", { name: "Start agent", exact: true })).toBeEnabled();
+  const blocked = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  let held = false;
+  await page.route("**/api/portfolio?**", async (route) => {
+    if (!held) { held = true; blocked.resolve(); await release.promise; }
+    await route.fallback();
+  });
+  const healthRead = page.waitForResponse((response) => response.url().endsWith("/api/health"));
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await Promise.all([blocked.promise, healthRead]);
+  await page.getByRole("button", { name: "Start agent", exact: true }).click();
+  release.resolve();
+  await expect(page.getByRole("button", { name: "Pause", exact: true })).toBeEnabled({ timeout: 1500 });
+});
+
+for (const initialPage of ["/settings", "/agents"]) {
+  test(`Run once from ${initialPage} reuses an unresolved key across reload and navigation`, async ({ page }) => {
+    const keys: string[] = [];
+    await page.route("**/api/agent/run-once", async (route) => {
+      const { requestId } = route.request().postDataJSON();
+      keys.push(requestId);
+      // The server accepted the operation, but the response was lost.
+      if (keys.length <= 2) return route.abort("failed");
+      return route.fulfill({ status: 202, json: { requestId, status: "completed" } });
+    });
+    await page.goto(initialPage);
+    await page.getByRole("button", { name: "Run once", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Failed to fetch");
+    await page.reload();
+    await page.getByRole("button", { name: "Run once", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Failed to fetch");
+    expect(keys[1]).toBe(keys[0]);
+    await page.getByRole("link", { name: initialPage === "/settings" ? "Agents" : "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Run once", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Run once", exact: true })).toBeEnabled();
+    expect(keys[2]).toBe(keys[0]);
+    await page.getByRole("button", { name: "Run once", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Run once", exact: true })).toBeEnabled();
+    expect(keys).toHaveLength(4);
+    expect(keys[3]).not.toBe(keys[0]);
+  });
+
+  test(`Run once from ${initialPage} isolates retry keys after a simulation reset`, async ({ page }) => {
+    const keys: string[] = [];
+    await page.route("**/api/agent/run-once", async (route) => {
+      keys.push(route.request().postDataJSON().requestId);
+      return route.abort("failed");
+    });
+    await page.goto(initialPage);
+    await page.getByRole("button", { name: "Run once", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Failed to fetch");
+    if (initialPage !== "/settings") await page.getByRole("link", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Reset simulation", exact: true }).click();
+    await page.getByRole("button", { name: "Archive and create", exact: true }).click();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+    await expect(page.locator(".topbar:visible")).not.toContainText("SIM 64da7e04");
+    await page.goto(initialPage);
+    await page.getByRole("button", { name: "Run once", exact: true }).click();
+    await expect(page.getByRole("alert")).toContainText("Failed to fetch");
+    expect(keys).toHaveLength(2);
+    expect(keys[1]).not.toBe(keys[0]);
+  });
+}
+
+test("saves decision age and adverse price movement limits independently of slippage", async ({ page }) => {
+  await page.goto("/settings");
+  await expect(page.getByLabel("Maximum decision age (seconds)")).toHaveValue("60");
+  await expect(page.getByLabel("Maximum adverse price movement (basis points)")).toHaveValue("50");
+  await page.getByLabel("Maximum decision age (seconds)").fill("30");
+  await page.getByLabel("Maximum adverse price movement (basis points)").fill("25");
+  const save = page.waitForRequest((request) => request.url().endsWith("/api/settings") && request.method() === "PATCH");
+  await page.getByRole("button", { name: "Save settings", exact: true }).click();
+  expect((await save).postDataJSON().values).toMatchObject({ maximumDecisionAgeSeconds: 30, maximumPriceMovementBps: 25, slippageBps: 5 });
+  await expect(page.getByText(/Saved configuration version 2/)).toBeVisible();
+  await page.reload();
+  await expect(page.getByLabel("Maximum decision age (seconds)")).toHaveValue("30");
+  await expect(page.getByLabel("Maximum adverse price movement (basis points)")).toHaveValue("25");
+});
+
+test("edits the per-trade fee as a percentage and saves the decimal rate", async ({ page }) => {
+  await page.goto('/settings');
+  const fee = page.getByLabel('Trading fee per buy or sell (%)', { exact: true });
+  await expect(fee).toHaveValue('0.1');
+  await page.getByRole('button', { name: 'Use researched average (0.35%)' }).click();
+  await expect(fee).toHaveValue('0.35');
+  const saved = page.waitForRequest(request => request.url().endsWith('/api/settings') && request.method() === 'PATCH');
+  await page.getByRole('button', { name: 'Save settings', exact: true }).click();
+  expect((await saved).postDataJSON().values.feeRate).toBe('0.0035');
+  await page.reload();
+  await expect(fee).toHaveValue('0.35');
+  await fee.fill('0.25');
+  const custom = page.waitForRequest(request => request.url().endsWith('/api/settings') && request.method() === 'PATCH');
+  await page.getByRole('button', { name: 'Save settings', exact: true }).click();
+  expect((await custom).postDataJSON().values.feeRate).toBe('0.0025');
 });

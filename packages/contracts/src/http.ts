@@ -10,3 +10,8 @@ export const SavePromptBodySchema = z.object({ name: z.string().trim().min(1).ma
 export const ActivatePromptBodySchema = z.object({ promptVersionId: uuid }).strict();
 export const SettingsBodySchema = z.object({ expectedVersion: z.number().int().min(1), values: z.record(z.string(), z.unknown()) }).strict();
 export const NewSimulationBodySchema = z.object({ startingCash: positiveDecimal, requestId: uuid }).strict();
+
+export const CreateAgentBodySchema = z.object({ name: z.string().trim().min(1).max(80), prompt: z.string().trim().min(1).max(12_000) }).strict();
+export const UpdateAgentBodySchema = z.object({ name: z.string().trim().min(1).max(80).optional(), enabled: z.boolean().optional(), isLead: z.boolean().optional(), archived: z.boolean().optional() }).strict();
+export const AgentPromptBodySchema = z.object({ content: z.string().trim().min(1).max(12_000) }).strict();
+export const ChatMessageBodySchema = z.object({ requestId: uuid, targetAgentId: uuid.nullable().optional(), content: z.string().trim().min(1).max(12_000) }).strict();

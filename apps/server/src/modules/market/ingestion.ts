@@ -1,6 +1,6 @@
 import type { Instrument, MarketDataProvider, MarketUpdate, ProviderHealth, Quote, CandleRequest, Candle } from "@paper-investor/contracts";
 
-type ExchangeInfo = { symbols: Array<{ symbol: string; status: string; baseAsset: string; quoteAsset: string; filters: Array<Record<string, string>> }> };
+type ExchangeInfo = { symbols: Array<{ symbol: string; status: string; baseAsset: string; quoteAsset: string; isSpotTradingAllowed?: boolean; filters: Array<Record<string, string>> }> };
 type SocketLike = { addEventListener(type: string, listener: (event: MessageEvent | Event) => void): void; close(code?: number, reason?: string): void };
 type Fetcher = typeof fetch;
 
@@ -12,24 +12,54 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
   private healthState: ProviderHealth = { status: "unavailable", detail: "Not connected" };
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private stopped = true;
+  private generation = 0;
+  private instrumentCatalog?: { data: Instrument[]; expiresAt: number };
+  private instrumentRequest?: Promise<Instrument[]>;
 
   constructor(private readonly fetcher: Fetcher = fetch, private readonly createSocket: (url: string) => SocketLike = (url) => new WebSocket(url)) {}
 
   async instruments(signal: AbortSignal): Promise<Instrument[]> {
-    const response = await this.fetcher("https://api.binance.com/api/v3/exchangeInfo", { signal });
-    if (!response.ok) throw new Error(`Binance exchangeInfo failed: ${response.status}`);
-    const data = await response.json() as ExchangeInfo;
-    return data.symbols.filter((item) => item.quoteAsset === "USDT").map((item) => {
-      const lot = item.filters.find((filter) => filter.filterType === "LOT_SIZE");
-      const price = item.filters.find((filter) => filter.filterType === "PRICE_FILTER");
-      const notional = item.filters.find((filter) => filter.filterType === "NOTIONAL" || filter.filterType === "MIN_NOTIONAL");
-      return { symbol: item.symbol, baseAsset: item.baseAsset, quoteAsset: item.quoteAsset, status: item.status === "TRADING" ? "trading" : "unavailable", priceIncrement: price?.tickSize ?? "0", quantityIncrement: lot?.stepSize ?? "0", minimumQuantity: lot?.minQty ?? "0", minimumNotional: notional?.minNotional ?? "0" };
+    signal.throwIfAborted();
+    if (this.instrumentCatalog && this.instrumentCatalog.expiresAt > Date.now()) return this.instrumentCatalog.data;
+    this.instrumentRequest ??= this.loadInstruments();
+    let cancel!: () => void;
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(signal.reason);
+      signal.addEventListener("abort", cancel, { once: true });
     });
+    try { return await Promise.race([this.instrumentRequest, cancelled]); }
+    finally { signal.removeEventListener("abort", cancel); }
+  }
+
+  private async loadInstruments(): Promise<Instrument[]> {
+    try {
+      const response = await this.fetcher("https://api.binance.com/api/v3/exchangeInfo", { signal: AbortSignal.timeout(10_000) });
+      if (!response.ok) throw new Error(`Binance exchangeInfo failed: ${response.status}`);
+      const data = await response.json() as ExchangeInfo;
+      const instruments: Instrument[] = data.symbols.filter((item) => item.quoteAsset === "USDT" && item.isSpotTradingAllowed !== false).map((item) => {
+        const lot = item.filters.find((filter) => filter.filterType === "LOT_SIZE");
+        const price = item.filters.find((filter) => filter.filterType === "PRICE_FILTER");
+        const notional = item.filters.find((filter) => filter.filterType === "NOTIONAL" || filter.filterType === "MIN_NOTIONAL");
+        return { symbol: item.symbol, baseAsset: item.baseAsset, quoteAsset: item.quoteAsset, status: item.status === "TRADING" ? "trading" : "unavailable", priceIncrement: price?.tickSize ?? "0", quantityIncrement: lot?.stepSize ?? "0", minimumQuantity: lot?.minQty ?? "0", minimumNotional: notional?.minNotional ?? "0" };
+      });
+      this.instrumentCatalog = { data: instruments, expiresAt: Date.now() + 300_000 };
+      return instruments;
+    } finally { this.instrumentRequest = undefined; }
+  }
+
+  cachedQuote(symbol: string): Quote | undefined {
+    const quote = this.quotes.get(symbol);
+    if (!quote) return;
+    const now = Date.now();
+    return [quote.observedAt, quote.receivedAt].every((value) => {
+      const timestamp = Date.parse(value);
+      return Number.isFinite(timestamp) && timestamp <= now && now - timestamp <= 5000;
+    }) ? quote : undefined;
   }
 
   async quote(symbol: string, signal: AbortSignal): Promise<Quote> {
-    const cached = this.quotes.get(symbol);
-    if (cached && Date.now() - Date.parse(cached.receivedAt) <= 5000) return cached;
+    const cached = this.cachedQuote(symbol);
+    if (cached) return cached;
     const response = await this.fetcher(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${encodeURIComponent(symbol)}`, { signal });
     if (!response.ok) throw new Error(`Binance quote failed for ${symbol}: ${response.status}`);
     const data = await response.json() as { bidPrice: string; askPrice: string; bidQty: string; askQty: string };
@@ -51,27 +81,32 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
   subscribe(symbols: string[], emit: (event: MarketUpdate) => void): () => void {
     this.stop();
     this.stopped = false;
+    const generation = this.generation;
+    const current = () => !this.stopped && generation === this.generation;
     const normalized = [...new Set(symbols.map((symbol) => symbol.toLowerCase()))];
     let retry = 0;
     const connect = () => {
-      if (this.stopped) return;
+      if (!current()) return;
       const streams = normalized.flatMap((symbol) => [`${symbol}@bookTicker`, `${symbol}@ticker`, `${symbol}@kline_1m`]).join("/");
       const socket = this.createSocket(`wss://stream.binance.com:9443/stream?streams=${streams}`);
       this.socket = socket;
       socket.addEventListener("open", () => {
+        if (!current() || this.socket !== socket) return;
         retry = 0; this.healthState = { status: "healthy", lastMessageAt: new Date().toISOString() }; emit({ type: "health", health: this.healthState });
         for (const symbol of normalized.map((value) => value.toUpperCase())) {
           const endTime = new Date();
           const startTime = this.lastClosedCandle.get(symbol) ?? new Date(endTime.getTime() - 120_000).toISOString();
           void this.candles({ symbol, interval: "1m", startTime, endTime: endTime.toISOString() }, AbortSignal.timeout(10_000))
             .then((history) => history.filter((candle) => candle.closed).forEach((candle) => {
+              if (!current() || this.socket !== socket) return;
               this.lastClosedCandle.set(symbol, candle.closeTime);
               emit({ type: "candle", candle });
             }))
-            .catch(() => emit({ type: "health", health: { status: "degraded", detail: `Candle backfill failed for ${symbol}` } }));
+            .catch(() => { if (current() && this.socket === socket) emit({ type: "health", health: { status: "degraded", detail: `Candle backfill failed for ${symbol}` } }); });
         }
       });
       socket.addEventListener("message", (event) => {
+        if (!current() || this.socket !== socket) return;
         try {
           const envelope = JSON.parse(String((event as MessageEvent).data)) as { stream: string; data: Record<string, unknown> };
           const data = envelope.data;
@@ -93,16 +128,19 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
           this.healthState = { status: "healthy", lastMessageAt: now };
         } catch { this.healthState = { status: "degraded", detail: "Malformed Binance stream event" }; emit({ type: "health", health: this.healthState }); }
       });
-      socket.addEventListener("error", () => { this.healthState = { status: "degraded", detail: "Binance WebSocket error" }; emit({ type: "health", health: this.healthState }); });
+      socket.addEventListener("error", () => {
+        if (!current() || this.socket !== socket) return;
+        this.healthState = { status: "degraded", detail: "Binance WebSocket error" }; emit({ type: "health", health: this.healthState });
+      });
       socket.addEventListener("close", () => {
-        if (this.stopped) return;
+        if (!current() || this.socket !== socket) return;
         this.healthState = { status: "degraded", detail: "Reconnecting to Binance" }; emit({ type: "health", health: this.healthState });
         retry += 1;
         this.reconnectTimer = setTimeout(connect, Math.min(30_000, 500 * 2 ** Math.min(retry, 6)));
       });
     };
     connect();
-    return () => this.stop();
+    return () => { if (generation === this.generation) this.stop(); };
   }
 
   health(symbol?: string): ProviderHealth {
@@ -114,6 +152,7 @@ export class BinanceMarketDataProvider implements MarketDataProvider {
 
   private stop() {
     this.stopped = true;
+    this.generation += 1;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = undefined;
     this.socket?.close(1000, "Subscription stopped");

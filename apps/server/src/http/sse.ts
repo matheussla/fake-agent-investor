@@ -9,6 +9,10 @@ export class EventHub {
   private readonly symbolStatus = new Map<string, ProviderHealth["status"]>();
   constructor() { this.emitter.setMaxListeners(100); }
   publish(event: AppEvent) { this.emitter.emit("event", event); }
+  setMarketSymbols(symbols: string[]) {
+    const active = new Set(symbols);
+    for (const symbol of this.symbolStatus.keys()) if (!active.has(symbol)) this.symbolStatus.delete(symbol);
+  }
   publishMarket(update: MarketUpdate) {
     if (update.type === "health") {
       this.marketStatus = update.health.status;

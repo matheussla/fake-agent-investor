@@ -1,0 +1,1 @@
+CREATE INDEX "quote_symbol_received" ON "quote_samples" USING btree ("symbol","received_at" DESC NULLS LAST);

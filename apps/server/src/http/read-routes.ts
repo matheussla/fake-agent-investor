@@ -1,15 +1,17 @@
+import type { AgentService } from "../modules/agent/service.js";
 import { randomUUID } from "node:crypto";
 import type { FastifyInstance } from "fastify";
 import type { Pool } from "pg";
 import { z } from "zod";
 import { isSameOriginLocal } from "./origin.js";
 import type { EventHub } from "./sse.js";
+import { latestQuotes } from "../modules/market/latest-quotes.js";
 
 const pageSchema = z.object({ limit: z.coerce.number().int().min(1).max(100).default(50), before: z.string().datetime().optional(), simulationId: z.string().uuid().optional() }).strict();
 const rangeSchema = z.object({ from: z.string().datetime().optional(), to: z.string().datetime().optional(), simulationId: z.string().uuid().optional() }).strict();
 const candleSchema = z.object({ symbol: z.string().regex(/^[A-Z0-9]{2,20}USDT$/), from: z.string().datetime().optional(), to: z.string().datetime().optional() }).strict();
 
-export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: EventHub): void {
+export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: EventHub, agentService?: AgentService): void {
   app.addHook("preHandler", async (request, reply) => {
     if (!isSameOriginLocal(request)) return reply.code(403).send({ error: { code: "ORIGIN_REJECTED", message: "Local same-origin request required" } });
   });
@@ -46,7 +48,15 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
     const result = await pool.query("SELECT cash::text,equity::text,realized_profit::text,unrealized_profit::text,observed_at FROM equity_history WHERE simulation_id=$1 AND ($2::timestamptz IS NULL OR observed_at >= $2) AND ($3::timestamptz IS NULL OR observed_at <= $3) ORDER BY observed_at DESC LIMIT 1000", [id, parsed.data.from ?? null, parsed.data.to ?? null]);
     return result.rows;
   });
-  app.get("/api/markets", async (request, reply) => paged(request, reply, async (_id, limit, before) => (await pool.query("SELECT DISTINCT ON(symbol) symbol,bid::text,ask::text,bid_size::text AS \"bidSize\",ask_size::text AS \"askSize\",observed_at FROM quote_samples WHERE ($1::timestamptz IS NULL OR observed_at < $1) ORDER BY symbol,observed_at DESC LIMIT $2", [before ?? null, limit])).rows));
+  app.get("/api/markets", async (request, reply) => paged(request, reply, async (id, limit, before) => {
+    const requested = await pool.query<{ symbol: string }>(`SELECT symbol FROM (
+      SELECT jsonb_array_elements_text(values->'assets') AS symbol FROM
+        (SELECT values FROM configurations WHERE simulation_id=$1 ORDER BY version DESC LIMIT 1) config
+      UNION SELECT symbol FROM positions WHERE simulation_id=$1 AND quantity<>0
+    ) markets ORDER BY symbol LIMIT $2`, [id, limit]);
+    const quotes = await latestQuotes(pool, requested.rows.map(({ symbol }) => symbol), before);
+    return quotes.map((quote) => ({ symbol: quote.symbol, bid: quote.bid, ask: quote.ask, bidSize: quote.bidSize, askSize: quote.askSize, observed_at: quote.observedAt }));
+  }));
   app.get("/api/candles", async (request, reply) => {
     const parsed = candleSchema.safeParse(request.query);
     if (!parsed.success || (parsed.data.from && parsed.data.to && parsed.data.from > parsed.data.to)) return reply.code(400).send({ error: { code: "INVALID_QUERY", message: "Invalid candle query" } });
@@ -54,7 +64,7 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
   });
   app.get("/api/trades", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT o.id,o.symbol,o.side,o.quantity::text,o.status,o.reason,o.created_at,f.price::text,f.fee::text FROM orders o LEFT JOIN fills f ON f.order_id=o.id WHERE o.simulation_id=$1 AND ($2::timestamptz IS NULL OR o.created_at < $2) ORDER BY o.created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
   app.get("/api/decisions", async (request, reply) => paged(request, reply, async (id, limit, before) => (await pool.query("SELECT id,request_id,result,failure,input_snapshot,prompt_version,created_at FROM decisions WHERE simulation_id=$1 AND ($2::timestamptz IS NULL OR created_at < $2) ORDER BY created_at DESC LIMIT $3", [id, before ?? null, limit])).rows));
-  app.get("/api/prompts", async (request, reply) => paged(request, reply, async (id, limit) => (await pool.query("SELECT id,name,version,content,active,created_at FROM prompts WHERE simulation_id=$1 ORDER BY name,version DESC LIMIT $2", [id, limit])).rows));
+  app.get("/api/prompts", async (request, reply) => paged(request, reply, async (id, limit) => (await pool.query("SELECT p.id,p.name,p.version,p.content,p.active,p.created_at FROM prompts p JOIN agents a ON a.id=p.agent_id WHERE p.simulation_id=$1 AND a.is_lead=true ORDER BY p.name,p.version DESC LIMIT $2", [id, limit])).rows));
   app.get("/api/settings", async (request, reply) => paged(request, reply, async (id) => (await pool.query("SELECT version,values,created_at FROM configurations WHERE simulation_id=$1 ORDER BY version DESC LIMIT 1", [id])).rows[0] ?? null));
   app.get("/api/health", async (_request, reply) => {
     let database: "healthy" | "unavailable" = "healthy";
@@ -67,10 +77,11 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
     ]);
     const providerUsage = Object.fromEntries(usage.rows.map((row) => [row.provider, row.attempts]));
     return reply.code(database === "healthy" ? 200 : 503).send({
+      cycleTiming: simulationId ? agentService?.getCycleTiming(simulationId) ?? null : null,
       database, market: events.health(), simulation: simulation.rows[0] ?? null,
       agent: agent.rows[0] ? { paused: agent.rows[0].paused, generation: agent.rows[0].generation, cycleRunning: agent.rows[0].cycle_running, pauseReason: agent.rows[0].pause_reason } : null,
       usage: { dailyAttempts: providerUsage.all ?? 0, providers: Object.fromEntries(Object.entries(providerUsage).filter(([provider]) => provider !== "all")) },
-      providers: { grok: process.env.XAI_API_KEY ? "configured" : "missing_credentials", codex: "disabled_isolation_unverified" },
+      providers: { grok: process.env.XAI_API_KEY ? "configured" : "missing_credentials", codex: process.env.OPENAI_API_KEY ? "configured" : "missing_credentials" },
     });
   });
   app.get("/api/simulations", async () => (await pool.query("SELECT id,status,starting_cash::text,created_at,archived_at FROM simulations ORDER BY created_at DESC LIMIT 100")).rows);
@@ -82,8 +93,10 @@ export function registerReadRoutes(app: FastifyInstance, pool: Pool, events: Eve
     let lastWrite = 0;
     const unsubscribe = events.subscribe((event) => {
       const now = Date.now();
-      if (now - lastWrite < 1000) return;
-      lastWrite = now;
+      if (["quote", "candle", "ticker"].includes(event.type)) {
+        if (now - lastWrite < 1000) return;
+        lastWrite = now;
+      }
       response.write(`id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
     });
     const heartbeat = setInterval(() => response.write(": heartbeat\n\n"), 15_000);

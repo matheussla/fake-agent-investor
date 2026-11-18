@@ -18,8 +18,10 @@ describe("live event lifecycle", () => {
     const disconnect = connectLiveEvents(refresh, source);
     source.emit("snapshot-required");
     source.emit("decision");
+    source.emit("team-run");
+    source.emit("agents");
     source.reconnect();
-    expect(refresh).toHaveBeenCalledTimes(3);
+    expect(refresh).toHaveBeenCalledTimes(5);
     disconnect();
     expect(source.closed).toBe(true);
   });

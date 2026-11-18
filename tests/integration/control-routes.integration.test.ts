@@ -45,7 +45,7 @@ describe("local simulation control routes", () => {
     expect(second.json().version).toBe(2);
     expect((await post(`/api/prompts/${first.json().id}/activate`, { promptVersionId: other.json().id })).statusCode).toBe(409);
     expect((await post(`/api/prompts/${first.json().id}/activate`, { promptVersionId: second.json().id })).statusCode).toBe(200);
-    expect((await pool.query("SELECT version FROM prompts WHERE simulation_id=$1 AND active=true", [simulationId])).rows[0].version).toBe(2);
+    expect((await pool.query("SELECT p.version FROM prompts p JOIN agents a ON a.id=p.agent_id WHERE p.simulation_id=$1 AND p.active=true AND a.is_lead", [simulationId])).rows[0].version).toBe(2);
   });
 
   it("updates paused settings with optimistic versions and reports stale conflicts", async () => {
@@ -63,7 +63,7 @@ describe("local simulation control routes", () => {
     const reset = await post("/api/simulations", { requestId, startingCash: "5000" });
     expect(reset.statusCode).toBe(201);
     expect(reset.json().id).not.toBe(simulationId);
-    expect((await pool.query("SELECT count(*)::int AS count FROM operational_events WHERE simulation_id=$1", [simulationId])).rows[0].count).toBe(1);
+    expect((await pool.query("SELECT count(*)::int AS count FROM operational_events WHERE simulation_id=$1 AND kind='test'", [simulationId])).rows[0].count).toBe(1);
     expect((await pool.query("SELECT status FROM simulations WHERE id=$1", [simulationId])).rows[0].status).toBe("archived");
     expect((await post("/api/simulations", { requestId, startingCash: "1000" })).json().id).toBe(reset.json().id);
   });

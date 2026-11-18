@@ -8,7 +8,9 @@ export function SimulationBalance({ activeSimulation, onCreated }: { activeSimul
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const create = async (event: React.FormEvent) => {
-    event.preventDefault(); setBusy(true); setError("");
+    event.preventDefault();
+    if (!Number.isFinite(Number(startingCash)) || Number(startingCash) <= 0) { setError("Enter a starting balance greater than 0 USDT."); return; }
+    setBusy(true); setError("");
     try {
       await sendControl("/api/simulations", "POST", { startingCash, requestId: crypto.randomUUID() });
       dialog.current?.close(); onCreated();

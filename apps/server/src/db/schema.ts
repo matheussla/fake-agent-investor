@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { boolean, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigserial, boolean, check, index, integer, jsonb, numeric, pgEnum, pgTable, text, timestamp, unique, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 
 export const simulationStatus = pgEnum("simulation_status", ["active", "archived"]);
 export const orderSide = pgEnum("order_side", ["buy", "sell"]);
@@ -17,10 +17,16 @@ export const configurations = pgTable("configurations", {
   version: integer("version").notNull(), values: jsonb("values").notNull(), createdAt: created(),
 }, (t) => [unique("configurations_sim_version").on(t.simulationId, t.version)]);
 
+export const agents = pgTable("agents", {
+  id: uuid("id").defaultRandom().primaryKey(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id),
+  name: text("name").notNull(), enabled: boolean("enabled").notNull().default(true), isLead: boolean("is_lead").notNull().default(false), archived: boolean("archived").notNull().default(false), createdAt: created(),
+}, (t) => [uniqueIndex("agents_one_lead").on(t.simulationId).where(sql`is_lead`), check("agents_lead_enabled", sql`NOT is_lead OR (enabled AND NOT archived)`)]);
+
 export const prompts = pgTable("prompts", {
+  agentId: uuid("agent_id").references(() => agents.id),
   id: uuid("id").defaultRandom().primaryKey(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id),
   name: text("name").notNull(), version: integer("version").notNull(), content: text("content").notNull(), active: boolean("active").notNull().default(false), createdAt: created(),
-}, (t) => [unique("prompts_sim_name_version").on(t.simulationId, t.name, t.version)]);
+}, (t) => [unique("prompts_agent_name_version").on(t.agentId, t.name, t.version)]);
 
 export const decisions = pgTable("decisions", {
   id: uuid("id").defaultRandom().primaryKey(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id),
@@ -54,7 +60,7 @@ export const equityHistory = pgTable("equity_history", {
 
 export const quoteSamples = pgTable("quote_samples", {
   id: uuid("id").defaultRandom().primaryKey(), symbol: text("symbol").notNull(), bid: money("bid").notNull(), ask: money("ask").notNull(), bidSize: money("bid_size").notNull(), askSize: money("ask_size").notNull(), observedAt: timestamp("observed_at", { withTimezone: true }).notNull(), receivedAt: timestamp("received_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [unique("quote_symbol_observed").on(t.symbol, t.observedAt), index("quote_observed").on(t.observedAt)]);
+}, (t) => [unique("quote_symbol_observed").on(t.symbol, t.observedAt), index("quote_observed").on(t.observedAt), index("quote_symbol_received").on(t.symbol, t.receivedAt.desc())]);
 
 export const candles = pgTable("candles", {
   id: uuid("id").defaultRandom().primaryKey(), symbol: text("symbol").notNull(), openTime: timestamp("open_time", { withTimezone: true }).notNull(), closeTime: timestamp("close_time", { withTimezone: true }).notNull(),
@@ -80,3 +86,13 @@ export const dailyBaselines = pgTable("daily_baselines", {
 export const resetRequests = pgTable("reset_requests", {
   requestId: uuid("request_id").primaryKey(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id), createdAt: created(),
 });
+
+export const teamRuns = pgTable("team_runs", {
+  id: uuid("id").defaultRandom().primaryKey(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id), requestId: uuid("request_id").notNull().unique(), kind: text("kind").notNull(), status: text("status").notNull().default("queued"), targetAgentId: uuid("target_agent_id").references(() => agents.id), decisionId: uuid("decision_id").references(() => decisions.id), generation: integer("generation").notNull(), configurationVersion: integer("configuration_version").notNull(), snapshot: jsonb("snapshot").notNull().default({}), callCount: integer("call_count").notNull().default(0), error: text("error"), createdAt: created(), startedAt: timestamp("started_at", { withTimezone: true }), finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("team_runs_one_working").on(t.simulationId).where(sql`status = 'working'`), index("team_runs_sim_time").on(t.simulationId,t.createdAt)]);
+export const agentTurns = pgTable("agent_turns", {
+  id: uuid("id").defaultRandom().primaryKey(), runId: uuid("run_id").notNull().references(() => teamRuns.id), agentId: uuid("agent_id").notNull().references(() => agents.id), status: text("status").notNull().default("queued"), input: jsonb("input").notNull().default({}), output: jsonb("output"), error: text("error"), createdAt: created(), finishedAt: timestamp("finished_at", { withTimezone: true }),
+}, (t) => [index("turns_run_status").on(t.runId,t.status)]);
+export const chatMessages = pgTable("chat_messages", {
+  id: uuid("id").defaultRandom().primaryKey(), sequence: bigserial("sequence", { mode: "number" }).notNull().unique(), simulationId: uuid("simulation_id").notNull().references(() => simulations.id), runId: uuid("run_id").references(() => teamRuns.id), senderAgentId: uuid("sender_agent_id").references(() => agents.id), recipientAgentId: uuid("recipient_agent_id").references(() => agents.id), kind: text("kind").notNull(), content: text("content").notNull(), status: text("status").notNull().default("delivered"), createdAt: created(),
+}, (t) => [index("messages_sim_sequence").on(t.simulationId,t.sequence)]);

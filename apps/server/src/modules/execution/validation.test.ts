@@ -6,7 +6,7 @@ const instrument: Instrument = { symbol: "BTCUSDT", baseAsset: "BTC", quoteAsset
 const quote: Quote = { symbol: "BTCUSDT", bid: "100", ask: "100.1", bidSize: "2", askSize: "1", observedAt: new Date().toISOString(), receivedAt: new Date().toISOString() };
 
 describe("paper order validation", () => {
-  it("applies five basis points of buy slippage and a 0.1 percent fee", () => expect(validatePaperOrder({ side: "buy", quantity: "0.5", instrument, quote }).price).toBe("100.15005"));
+  it("applies five basis points of buy slippage and the default fee", () => expect(validatePaperOrder({ side: "buy", quantity: "0.5", instrument, quote }).price).toBe("100.15005"));
   it.each(["0.5001", "3"])("rejects unsupported or oversized quantity %s", (quantity) => expect(() => validatePaperOrder({ side: "buy", quantity, instrument, quote })).toThrow());
   it("rejects stale quotes and below-minimum orders", () => {
     expect(() => validatePaperOrder({ side: "buy", quantity: "0.5", instrument, quote, now: Date.parse(quote.receivedAt) + 5001 })).toThrow("Stale quote");
@@ -16,4 +16,16 @@ describe("paper order validation", () => {
     const receipt = Date.parse(quote.receivedAt);
     expect(() => assertQuoteFresh(quote, receipt + 5001)).toThrow("Stale quote");
   });
+});
+
+it.each(["observedAt", "receivedAt"] as const)("rejects a future %s even when the other timestamp is current", (field) => {
+  const now = Date.now();
+  const current = { ...quote, observedAt: new Date(now).toISOString(), receivedAt: new Date(now).toISOString(), [field]: new Date(now + 1000).toISOString() };
+  expect(() => assertQuoteFresh(current, now)).toThrow("Stale quote");
+});
+
+it.each(["buy", "sell"] as const)("charges the configured fee on a %s fill", (side) => {
+  const current = { ...quote, bid: "100", ask: "100", observedAt: new Date().toISOString(), receivedAt: new Date().toISOString() };
+  expect(validatePaperOrder({ side, quantity: "1", instrument, quote: current, slippageBps: 0 }).fee).toBe("0.35");
+  expect(validatePaperOrder({ side, quantity: "1", instrument, quote: current, slippageBps: 0, feeRate: "0.0025" }).fee).toBe("0.25");
 });

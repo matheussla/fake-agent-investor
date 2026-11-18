@@ -1,7 +1,7 @@
 import { createDatabase } from "./db/client.js";
 import { buildDecisionInput } from "./modules/decisions/context.js";
 import { BinanceMarketDataProvider } from "./modules/market/ingestion.js";
-import { checkCodexCapabilities } from "./providers/codex.js";
+import { CodexDecisionProvider } from "./providers/codex.js";
 import { GrokDecisionProvider } from "./providers/grok.js";
 
 const command = process.argv[2];
@@ -59,10 +59,16 @@ async function smokeGrok(): Promise<void> {
 }
 
 async function smokeCodex(): Promise<void> {
-  const health = await checkCodexCapabilities();
-  if (health.status === "healthy") {
-    console.log("Codex isolation capability check passed, but this smoke command does not make a model request.");
-    return;
-  }
-  console.log(`SKIP Codex model request: ${health.detail}. No model request or order was sent.`);
+  if (!process.env.OPENAI_API_KEY) throw new Error("Codex smoke check requires OPENAI_API_KEY");
+  const provider = new CodexDecisionProvider();
+  const startedAt = Date.now();
+  const result = await provider.decide({
+    simulationId: "codex-smoke", snapshot: { cash: "1000", positions: [] }, market: [],
+    limits: { provider: "codex", model: provider.model, assets: [] },
+    prompt: "This is a connectivity check. Return hold because no market quotes are available.",
+    promptVersion: 1, configurationVersion: 1,
+  }, AbortSignal.timeout(30_000));
+  if (result.decision.action !== "hold") throw new Error("Codex smoke check expected a hold decision");
+  console.log(`PASS Codex API decision request: model=${provider.model}, action=${result.decision.action}, latency=${Date.now() - startedAt}ms, inputTokens=${result.usage?.inputTokens ?? "unknown"}, outputTokens=${result.usage?.outputTokens ?? "unknown"}.`);
+  console.log("The synthetic decision was validated and discarded. No order was created or submitted.");
 }

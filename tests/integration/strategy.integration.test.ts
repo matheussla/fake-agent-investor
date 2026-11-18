@@ -48,3 +48,11 @@ describe("strategy versions and simulation reset", () => {
     expect((await pool.query("SELECT count(*)::int AS count FROM simulations WHERE status='active'")).rows[0].count).toBe(1);
   });
 });
+
+it("validates execution freshness and price limits while preserving old configuration compatibility", async () => {
+  const defaults = (await pool.query("SELECT values FROM configurations WHERE simulation_id=$1", [simulationId])).rows[0].values;
+  const updated = await updateSettings(db, { simulationId, expectedVersion: 1, values: { ...defaults, maximumDecisionAgeSeconds: 30, maximumPriceMovementBps: 25 } });
+  expect(updated.values).toMatchObject({ maximumDecisionAgeSeconds: 30, maximumPriceMovementBps: 25 });
+  await expect(updateSettings(db, { simulationId, expectedVersion: 2, values: { ...updated.values, maximumDecisionAgeSeconds: 0 } })).rejects.toThrow("Invalid settings");
+  await expect(updateSettings(db, { simulationId, expectedVersion: 2, values: { ...updated.values, maximumPriceMovementBps: 501 } })).rejects.toThrow("Invalid settings");
+});

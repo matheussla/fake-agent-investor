@@ -1,8 +1,10 @@
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDatabase } from "../../apps/server/src/db/client.js";
 import { createSimulation } from "../../apps/server/src/modules/simulations/service.js";
 import { persistMarketUpdate, pruneMarketHistory } from "../../apps/server/src/modules/market/retention.js";
 import { refreshValuation } from "../../apps/server/src/modules/portfolio/valuation.js";
+import { enforceDailyLoss } from "../../apps/server/src/modules/risk/daily-loss.js";
+import { latestQuotes } from "../../apps/server/src/modules/market/latest-quotes.js";
 import { buildApp } from "../../apps/server/src/app.js";
 import { EventHub } from "../../apps/server/src/http/sse.js";
 
@@ -55,4 +57,39 @@ describe("market history and portfolio valuation", () => {
     expect(response.json().dataStatus).toBe("stale");
     await app.close();
   });
+});
+
+it.each([refreshValuation, enforceDailyLoss])("uses current quote time after waiting for the portfolio lock (%#)", async (refresh) => {
+  await pool.query("INSERT INTO positions(simulation_id,symbol,quantity,cost_basis) VALUES($1,'BTCUSDT',1,100)", [simulationId]);
+  const blocker = await pool.connect();
+  await blocker.query("BEGIN");
+  await blocker.query("SELECT id FROM simulations WHERE id=$1 FOR UPDATE", [simulationId]);
+  const pending = refresh(pool, simulationId);
+  const outcome = expect(pending).resolves.not.toThrow();
+  try {
+    await vi.waitFor(async () => expect((await pool.query("SELECT count(*)::int AS count FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'")).rows[0].count).toBeGreaterThan(0));
+    await pool.query("INSERT INTO quote_samples(symbol,bid,ask,bid_size,ask_size,observed_at,received_at) VALUES('BTCUSDT',100,101,1,1,clock_timestamp(),clock_timestamp())");
+  } finally { await blocker.query("ROLLBACK"); blocker.release(); }
+  await outcome;
+});
+
+it("selects one latest received quote per requested symbol without losing decimal precision", async () => {
+  await pool.query("INSERT INTO quote_samples(symbol,bid,ask,bid_size,ask_size,observed_at,received_at) VALUES('BTCUSDT',100,101,1,1,now()-interval '3 seconds',now()-interval '2 seconds'),('BTCUSDT',100.123456789123456789,101,2,3,now()-interval '2 seconds',now()-interval '1 second'),('ETHUSDT',50,51,4,5,now(),now())");
+  const quotes = await latestQuotes(pool, ["BTCUSDT", "ETHUSDT", "BTCUSDT", "MISSINGUSDT"]);
+  expect(quotes).toHaveLength(2);
+  expect(quotes.find((quote) => quote.symbol === "BTCUSDT")?.bid).toBe("100.123456789123456789");
+  expect(quotes.find((quote) => quote.symbol === "ETHUSDT")?.bid).toBe("50.000000000000000000");
+});
+
+it("paginates market quotes by observation time and omits markets outside the simulation", async () => {
+  await pool.query("INSERT INTO quote_samples(symbol,bid,ask,bid_size,ask_size,observed_at,received_at) VALUES('BTCUSDT',99,100,1,1,now()-interval '10 seconds',now()-interval '10 seconds'),('BTCUSDT',100,101,1,1,now(),now()),('NOTCONFIGUREDUSDT',1,2,1,1,now(),now())");
+  const app = buildApp(pool, new EventHub());
+  try {
+    const current = await app.inject({ method: "GET", url: `/api/markets?simulationId=${simulationId}`, headers: { host: "127.0.0.1:3000" } });
+    expect(current.json().map((quote: { symbol: string }) => quote.symbol)).toEqual(["BTCUSDT"]);
+    expect(current.json()[0].bid).toBe("100.000000000000000000");
+    const before = encodeURIComponent(new Date(Date.now() - 5000).toISOString());
+    const historical = await app.inject({ method: "GET", url: `/api/markets?simulationId=${simulationId}&before=${before}`, headers: { host: "127.0.0.1:3000" } });
+    expect(historical.json()[0].bid).toBe("99.000000000000000000");
+  } finally { await app.close(); }
 });

@@ -19,4 +19,4 @@ The PostgreSQL suite covers accounting and immutable ledger behavior, risk limit
 
 Live exchange and model checks are separate from automated tests. They use public market data or one bounded decision request and do not submit orders. Run them only after configuring the relevant service credentials; commands and expected results are documented in the repository README.
 
-The Codex adapter stays disabled while the installed CLI cannot prove that its command tool is isolated. Automated checks verify this fail-closed behavior. They do not invoke Codex or modify the user's Codex configuration.
+The Codex adapter uses the OpenAI Responses API without tools. Automated tests mock the HTTP boundary and verify structured decisions, usage, cancellation, missing credentials, error redaction, and the daily allowance. `pnpm smoke:codex` sends one bounded request with synthetic data using `OPENAI_API_KEY`, validates a hold decision, and discards it without submitting an order. No Codex CLI configuration is read or modified.

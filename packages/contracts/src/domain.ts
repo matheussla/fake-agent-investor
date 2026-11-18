@@ -16,7 +16,7 @@ export interface ProviderHealth { status: "healthy" | "degraded" | "unavailable"
 export type MarketEvent = { type: "quote"; quote: Quote } | { type: "candle"; candle: Candle } | { type: "health"; health: ProviderHealth };
 export type MarketUpdate = MarketEvent | { type: "ticker"; symbol: string; priceChangePercent: string; quoteVolume: string; observedAt: string };
 export type DecisionResult = { decision: Decision; usage?: { inputTokens?: number; outputTokens?: number } };
-export interface DecisionInput { simulationId: string; snapshot: unknown; market: Quote[]; limits: unknown; prompt: string; promptVersion: number; configurationVersion: number; }
+export interface DecisionInput { capturedAt?: string; simulationId: string; snapshot: unknown; market: Quote[]; candles?: Candle[]; limits: unknown; prompt: string; promptVersion: number; configurationVersion: number; }
 export interface ApprovedOrder { decisionId: string; simulationId: string; runGeneration: number; configurationVersion: number; symbol: string; side: "buy" | "sell"; quantity: string; quote: Quote; }
 export interface Fill { orderId: string; symbol: string; side: "buy" | "sell"; quantity: string; price: string; fee: string; timestamp: string; }
 export interface ExecutionResult { status: "filled" | "rejected"; orderId: string; reason?: string; }
@@ -39,11 +39,12 @@ export interface DecisionRecord { id: string; simulationId: string; requestId: s
 export interface MarketDataProvider {
   instruments(signal: AbortSignal): Promise<Instrument[]>;
   quote(symbol: string, signal: AbortSignal): Promise<Quote>;
+  cachedQuote?(symbol: string): Quote | undefined;
   candles(request: CandleRequest, signal: AbortSignal): Promise<Candle[]>;
   subscribe(symbols: string[], emit: (event: MarketUpdate) => void): () => void;
-  health(): ProviderHealth;
+  health(symbol?: string): ProviderHealth;
 }
-export interface DecisionProvider { decide(input: DecisionInput, signal: AbortSignal): Promise<DecisionResult>; }
+export interface DecisionProvider { readonly managesUsage?: boolean; decide(input: DecisionInput, signal: AbortSignal): Promise<DecisionResult>; }
 export interface ExecutionProvider {
   submit(order: ApprovedOrder, signal: AbortSignal): Promise<ExecutionResult>;
   status(orderId: string): Promise<OrderStatus>;
@@ -51,3 +52,11 @@ export interface ExecutionProvider {
   cancel(orderId: string): Promise<CancelResult>;
   reconcile(simulationId: string): Promise<ReconciliationResult>;
 }
+
+export interface TeamAgent { id: string; simulationId: string; name: string; enabled: boolean; isLead: boolean; archived: boolean; prompt: string; promptVersion: number; status: string; }
+export const AgentTurnOutputSchema = z.object({ message: z.string().max(8000), handoffs: z.array(z.object({ recipientAgentId: z.string().uuid(), content: z.string().trim().min(1).max(8000) }).strict()).max(10), decision: DecisionSchema.nullable() }).strict();
+export type AgentTurnOutput = z.infer<typeof AgentTurnOutputSchema>;
+export interface AgentTurnInput { agent: TeamAgent; roster: TeamAgent[]; context: DecisionInput; history: unknown[]; messages: string[]; finalize: boolean; kind: "discussion" | "trading"; }
+export interface AgentTurnProvider { turn(input: AgentTurnInput, signal: AbortSignal): Promise<AgentTurnOutput>; }
+export interface ChatMessage { id: string; cursor: string; simulationId: string; runId: string | null; senderAgentId: string | null; recipientAgentId: string | null; senderName: string; recipientName: string | null; kind: string; content: string; status: string; createdAt: string; }
+export interface TeamRun { id: string; simulationId: string; kind: "discussion" | "trading"; status: string; createdAt: string; completedAt: string | null; error: string | null; decisionId: string | null; callCount: number; }
