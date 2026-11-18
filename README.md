@@ -1,70 +1,132 @@
 # Paper Crypto Investor
 
-A local paper trading app that uses live Binance spot market data and configurable Grok and Codex decision providers. The app only simulates orders; it has no live trading adapter.
+**An AI trading team with independent perspectives, visible collaboration, and an auditable decision history.**
 
-## Requirements
+Paper Crypto Investor brings multiple AI agents together to analyze live Binance spot data, challenge trade ideas, and manage a simulated crypto portfolio. Give each agent its own instructions, watch the discussion, and inspect the evidence behind every BUY, SELL, or HOLD.
+
+Powered by the **OpenAI Responses API** or **xAI/Grok**, with configurable prompts, continuous trading sessions, and saved reports for future strategy analysis. All orders and balances are simulated; there is no live trading adapter.
+
+![Paper Crypto Investor dashboard showing session controls, portfolio performance, equity history, and market candles](docs/screenshots/dashboard.png)
+
+*Actual local paper-trading session, paused. Figures are sample results; the dashboard also surfaces stale market data.*
+
+## Your AI trading team
+
+Five starter agents bring different responsibilities to one portfolio:
+
+- **Trading Lead** coordinates the discussion and submits the final trading decision.
+- **Market Analyst** evaluates prices, liquidity, and uncertainty in the supplied market data.
+- **Momentum Analyst** examines momentum using the available price evidence.
+- **Risk Analyst** checks exposure, liquidity, and configured risk limits.
+- **Skeptic** challenges proposals, missing evidence, and downside assumptions.
+
+Each agent has a separate, versioned prompt. In **Agents**, edit their instructions, add agents up to a ten-agent roster, disable or archive specialists, and assign an enabled agent as lead while the team is paused and idle. The selected provider and model apply to the entire team.
+
+Team conversations, individual chats, and agent handoffs make collaboration visible. Chat is discussion-only: starting a trading session or choosing **Run once** authorizes an evaluation. Only the lead's final decision can reach paper execution.
+
+### How AI becomes a trading decision
+
+1. **Capture evidence.** Collect the portfolio, configured risk limits, live quotes, and up to 60 closed one-minute candles per configured asset. Unfinished and future candles are excluded.
+2. **Collaborate.** Agents analyze the same evidence, share findings, and challenge proposals through bounded turns and handoffs.
+3. **Finalize.** The lead submits a structured BUY, SELL, or HOLD decision, validated before execution.
+4. **Enforce limits.** Deterministic checks enforce exposure, balance, liquidity, price freshness, and other execution constraints. Model output cannot bypass them.
+5. **Save the outcome.** Persist the decision evidence, agent contributions, execution results, and trading costs for later analysis.
+
+The harness supports up to five concurrent requests, with one turn per agent at a time. Each run is limited to 20 model calls and three minutes; individual requests have a one-minute timeout. A five-agent evaluation uses at least six calls, including lead finalization.
+
+**OpenAI integration:** the provider labeled Codex uses the OpenAI Responses API with `gpt-5.3-codex` by default. It does not launch the Codex CLI or read its credentials. API keys stay on the server. Agent collaboration also supports xAI/Grok.
+
+## Continuous trading, visible controls
+
+Start a session from **Dashboard** or **Agents**. The next evaluation starts after the previous one completes, without a fixed five-minute interval. Each evaluation can trade or hold according to its evidence and risk checks.
+
+The dashboard shows session elapsed time and running or paused status, with **Start**, **Pause**, **Run once**, and **Stop cycle** controls. Sessions continue until manually stopped or interrupted by a guardrail, such as the call-budget cutoff, daily loss limit, repeated provider failures, or a server restart. Market ingestion and portfolio valuation continue while trading is paused.
+
+### AI usage and budget
+
+The Agents usage bar measures a **configurable app model-call allowance**, shared across agents, simulations, and providers. The default is 300 calls per UTC day, with an automatic stop at 95% (285 calls). Failed attempts count, and resetting a portfolio does not reset usage.
+
+This is not OpenAI account usage, a Codex subscription quota, or a dollar balance. OpenAI billing, token usage, and API charges are not currently tracked in the reports. Model calls can incur real API charges independently of simulated trading funds.
+
+## Explore the platform
+
+- **Dashboard:** monitor equity, available cash, profit, exposure, positions, recent trades, fees, agent activity, and service health. Browse Binance USDT spot markets with candle charts, including markets outside the trading watchlist. Failed dashboard reads retry automatically.
+- **Agents:** manage the roster and versioned prompts, inspect conversations and handoffs, chat with individual agents, and monitor the daily call allowance.
+- **Settings:** choose the AI provider, model, markets, strategy, risk limits, trading fees, slippage, and call budget. Set initial virtual funding or reset into a new simulation while preserving archived history.
+- **Reports:** filter saved evaluations by date, browse active or archived simulations, download JSON evidence, and delete or restore reports without changing trades or balances.
+
+Navigation always follows **Dashboard → Agents → Settings → Reports**. Chart selections and unsaved drafts survive navigation within the browser session; reloading clears unsaved drafts.
+
+### Trading costs and risk controls
+
+Paper fills use bid/ask prices, configured slippage, and a fee on every filled buy and sell. Fees affect cash, position cost basis, and realized sell profit, so results reflect entry and exit costs.
+
+The configurable default fee is **0.35% per fill**, based on a two-exchange taker-fee sample. It is a simulation assumption, not a universal exchange fee; change it in Settings to match your intended venue and tier.
+
+Default risk limits cap a buy at 10% of equity, one asset at 25%, total exposure at 50%, and daily equity loss at 5%. Decisions also face age, adverse-price-movement, quantity, minimum-notional, and liquidity checks. AI decisions can be rejected, and profitable outcomes are not guaranteed.
+
+## Reports for future improvement
+
+Every completed evaluation—including HOLD, rejected trades, and failures—produces a versioned JSON report stored in PostgreSQL. Reports retain:
+
+- Market and portfolio snapshots, configuration, and versioned agent prompts.
+- Individual agent turns, messages, and the final decision.
+- Orders, fills, and ledger entries.
+- Trading fees, turnover, realized sell profit, filled/rejected counts, and available model-call counts.
+
+These records provide evidence for a future analyst or agent to compare strategies and recommend changes. **Automatic recommendations and self-modifying strategies are not implemented.** Reports do not attribute profit causally to an individual agent, and open buys are not treated as realized gains.
+
+Missing reports are retried through a recovery job. Date filters use your local timezone and include the entire selected end date. Deletion hides a report and supports restoration; it preserves the original trading records. Back up PostgreSQL to preserve the archive outside this machine.
+
+See the [execution and report reference](docs/execution-and-reports.md) for transaction guarantees, report schemas, API endpoints, and historical-data limitations.
+
+## Run locally
+
+### Requirements
 
 - macOS or Linux
 - Node.js 24.11.1 (see `.node-version`)
 - pnpm 10
 - Docker with Docker Compose
-- An xAI API key for Grok decisions or an OpenAI API key for Codex decisions
-
-Codex decisions use the OpenAI Responses API with `gpt-5.3-codex` by default. No tools are exposed to the model. The app never launches the Codex CLI or reads its credentials.
-
-## Start locally
+- An OpenAI API key or an xAI API key
 
 ```sh
 pnpm install
 cp .env.example .env
 ```
 
-Set `XAI_API_KEY` in `.env` to enable Grok, or `OPENAI_API_KEY` to enable Codex. The server reads this file at startup. Keep `.env` private; it is ignored by Git.
-
-Start PostgreSQL and apply the schema:
+Set `OPENAI_API_KEY` for Codex or `XAI_API_KEY` for Grok in `.env`. The server reads this file at startup. Keep `.env` private; Git ignores it.
 
 ```sh
 pnpm db:up
 pnpm db:migrate
-```
-
-Start the local API and web app:
-
-```sh
 pnpm dev
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API binds to `127.0.0.1:3000`. On first run, open Settings and choose the starting virtual USDT balance. That balance stays fixed for the simulation; choose a new balance only when resetting it. Configure trading settings and a strategy prompt, save while the agent is paused, then start or pause the agent from Settings. The app continues market ingestion and valuation while the agent is paused.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). The API binds to `127.0.0.1:3000`.
 
-The dashboard market picker searches active Binance USDT spot pairs, including markets outside the agent's configured watchlist. Candle history loads on demand and refreshes every 15 seconds. Browsing a market does not add it to the trading strategy. Switching between Dashboard, Agents, and Settings preserves chart selections and unsaved drafts within the current browser session; reloading the browser clears unsaved drafts.
+1. Open **Settings**, choose your starting virtual USDT balance, and configure the provider, model, markets, fees, and risk limits.
+2. Open **Agents** to review the team and its prompts.
+3. Choose **Run once** for one evaluation, or start a continuous session.
+4. Follow decisions on the dashboard and download the resulting evidence from **Reports**.
 
-To stop PostgreSQL, run `pnpm db:down`. Its Docker volume is retained.
+Save strategy and team changes while trading is paused and idle. Starting funds stay fixed for each simulation; reset to choose a new balance. Reset retains the roster, prompts, and settings in a new simulation, while previous conversations remain in the archive. Server restarts preserve stored history and leave interrupted trading stopped.
 
-## Agent team
+To stop PostgreSQL, run `pnpm db:down`; its Docker volume is retained.
 
-Open **Agents** to manage the Trading Lead, Market Analyst, Momentum Analyst, Risk Analyst, and Skeptic. Each agent has a separate versioned prompt. You can add up to ten agents, disable or archive specialists, and assign a different enabled lead while the team is paused and idle.
+### Environment
 
-Use Team chat to address the lead, or select an agent for an individual conversation. Agent handoffs appear in the activity feed. Chat is discussion-only: **Start team** and **Run once** authorize trading cycles, and only the lead's final decision reaches the existing paper execution and risk checks.
+- `HOST`: `127.0.0.1`. Other bind addresses are rejected.
+- `PORT`: `3000` by default.
+- `DATABASE_URL`: local PostgreSQL connection; see `.env.example`.
+- `OPENAI_API_KEY`: server-side OpenAI credential.
+- `XAI_API_KEY`: server-side xAI credential.
 
-The harness runs up to five requests concurrently, with one turn per agent. Runs are bounded to 20 model calls and three minutes; each request has a one-minute timeout. The daily model-call allowance defaults to 300 and can be changed in Settings. All agent requests count toward this allowance. A five-agent cycle uses at least six calls, including lead finalization. Pause cancels pending work; restarting the server preserves transcripts and leaves interrupted work stopped.
+The app is designed for local use. API access is same-origin, and mutations require an explicit same-origin JSON request. Do not expose it to a public network.
 
-Apply database migrations before starting the updated server. Existing strategies become lead prompts and the migrated team starts paused. Reset retains the roster, prompts, and settings in a new simulation; old conversation history remains attached to the archived simulation. Daily usage does not reset with the portfolio.
+## Stack
 
-Decision snapshots include up to 60 closed one-minute candles per configured asset from the last two hours, in chronological order. Missing history remains empty; future and unfinished candles are excluded. This gives agents price history without unbounded prompts or network requests during decision capture.
-
-## Configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `HOST` | `127.0.0.1` | API bind address. Other bind addresses are rejected. |
-| `PORT` | `3000` | API port. |
-| `DATABASE_URL` | `postgres://paper:paper@127.0.0.1:5433/paper_investor` | PostgreSQL connection. |
-| `XAI_API_KEY` | unset | Server-side Grok API credential. |
-| `OPENAI_API_KEY` | unset | Server-side Codex API credential. |
-
-The initial strategy watches BTC/USDT, ETH/USDT, and SOL/USDT, with a five-minute decision cadence. Risk defaults cap a buy at 10% of equity, a single asset at 25%, total exposure at 50%, and daily equity loss at 5%. Fees and slippage are simulated settings. Both providers validate decisions before they can reach paper execution. To use Codex, pause the agent, select **Codex API** in Settings, and save; switching providers selects the matching default model. Codex requests count toward the daily allowance. Team chat and agent collaboration support both providers. The selected provider and model apply to all team members; each turn counts once toward the shared daily allowance.
-
-API and dashboard controls are local and same-origin only. Do not expose the app to a public network.
+TypeScript throughout, with React and Vite for the interface, Fastify for the API, PostgreSQL and Drizzle for persistence, the Vercel AI SDK for model integration, Zod for validation, Decimal.js for financial calculations, and Lightweight Charts for market visualization.
 
 ## Smoke checks
 
@@ -98,28 +160,3 @@ pnpm build
 ```
 
 See [docs/validation.md](docs/validation.md) for coverage and system validation details. Integration tests truncate data in `paper_investor_test`; they do not use the application database.
-
-### Execution safety and latency
-
-Paper fills retain a single PostgreSQL transaction for orders, fills, ledger movements, and positions. Trades, valuation, and daily-loss enforcement lock the simulation in the same order, preventing concurrent overspending, overselling, or mixed portfolio snapshots. Failed or cancelled transactions roll back. Once COMMIT has been sent, cancellation cannot undo a completed fill; retry the same request to discover its stored outcome.
-
-Run Once retains its request ID in session storage until the server confirms it, including across navigation and reloads. Execution retries return the original filled or rejected order. Reusing a decision ID with a different side, symbol, quantity, generation, or configuration fails with an idempotency conflict.
-
-Execution uses fresh in-memory Binance quotes when available, with indexed latest-sample lookups as a fallback. No market network requests run while a portfolio transaction holds its lock. Binance instrument metadata is cached for five minutes; concurrent callers share a ten-second bounded refresh without cancelling each other. Execution has a five-second cancellation deadline, database lock waits are capped at two seconds, and database statements and connection acquisition are bounded at five seconds. An in-flight statement may finish before cancellation is checked; cancellation is checked again before COMMIT.
-
-Strategy settings include **Maximum decision age** (default 60 seconds, range 1–180) and **Maximum adverse price movement** (default 50 basis points, range 0–500). These are separate from simulated slippage. Old decisions and prices moving against the proposed trade are rejected and recorded. Favorable price movement still passes through all existing risk checks. Existing configurations receive the same defaults without rewriting their history.
-
-Decision records include execution duration and decision age in milliseconds. The cadence and model-call allowance remain strategy controls; database optimizations do not shorten the AI deliberation cycle or guarantee profitable trades. Apply migration `0006_quote_symbol_received` with the normal migration command before benchmarking quote history lookups.
-
-### Saved trading reports
-
-Every terminal trading evaluation (including HOLD, failure, and rejection) is saved as a versioned JSON `decision_report` in PostgreSQL `operational_events`. Startup and a 30-second recovery job backfill missing reports in batches of 100. Report-write failures are logged and retried without changing a completed trade. Back up PostgreSQL to retain these reports outside this machine.
-
-The **Reports** tab downloads recent reports. Local same-origin APIs:
-- `GET /api/reports?simulationId=<uuid>&limit=20&before=<ISO timestamp>` lists saved reports (maximum 100 per page).
-- `GET /api/reports/<report UUID>` downloads the complete JSON evidence.
-- `GET /api/trading-sessions?simulationId=<uuid>` retrieves persisted session start/stop events.
-
-Schema version 1 retains the decision input snapshot, configuration, team snapshot (including versioned prompts), individual turns/messages, orders, fills, and ledger entries. Money remains decimal strings. Metrics include filled/rejected counts, fees, turnover, realized sell profit after entry/exit trading costs, and team call counts. Open buys are not scored as realized gains. Fees are informational and must not be subtracted again from realized profit. Historical session boundaries, standalone-provider call counts, token usage, and API charges may be unavailable; these are not reconstructed as facts. Reports do not claim causal agent profitability or automatically change prompts. Future analysis should compare configurations across adequate samples and test recommendations out of sample.
-
-Reports can be filtered by evaluation start time using `from` (inclusive) and `to` (exclusive) ISO timestamps. The Reports tab converts local calendar dates into those bounds. `deleted=true` lists hidden reports. `DELETE /api/reports/<uuid>` hides a report; `POST /api/reports/<uuid>/restore` restores it. Both require a local same-origin JSON request with `{}`. Deletion preserves the evidence payload and all trades/balances, and recovery does not recreate hidden reports.
